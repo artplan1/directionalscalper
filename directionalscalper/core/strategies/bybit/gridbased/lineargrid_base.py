@@ -14,6 +14,8 @@ from directionalscalper.core.exchanges.bybit import BybitExchange
 from directionalscalper.core.strategies.logger import Logger
 from live_table_manager import shared_symbols_data
 from rate_limit import RateLimit
+import state
+
 logging = Logger(logger_name="LinearGridBase", filename="LinearGridBase.log", stream=True)
 
 symbol_locks = {}
@@ -23,7 +25,7 @@ class LinearGridBaseFutures(BybitStrategy):
         super().__init__(exchange, config, manager, symbols_allowed)
         self.rate_limiter = RateLimit(10, 1)
         self.general_rate_limiter = RateLimit(50, 1)
-        self.order_rate_limiter = RateLimit(5, 1) 
+        self.order_rate_limiter = RateLimit(5, 1)
         self.mfirsi_signal = mfirsi_signal
         self.is_order_history_populated = False
         self.last_health_check_time = time.time()
@@ -138,7 +140,7 @@ class LinearGridBaseFutures(BybitStrategy):
 
 
             test_orders_enabled = self.config.test_orders_enabled
-            
+
 
             levels = self.config.linear_grid['levels']
             strength = self.config.linear_grid['strength']
@@ -207,18 +209,18 @@ class LinearGridBaseFutures(BybitStrategy):
             auto_reduce_wallet_exposure_pct = self.config.auto_reduce_wallet_exposure_pct
 
             percentile_auto_reduce_enabled = self.config.percentile_auto_reduce_enabled
-        
+
             max_pos_balance_pct = self.config.max_pos_balance_pct
 
             # Funding
             MaxAbsFundingRate = self.config.MaxAbsFundingRate
-            
+
             # Hedge ratio
             hedge_ratio = self.config.hedge_ratio
 
             # Hedge price diff
             price_difference_threshold = self.config.hedge_price_difference_threshold
-                    
+
             logging.info("Setting up exchange")
             self.exchange.setup_exchange_bybit(symbol)
 
@@ -264,7 +266,7 @@ class LinearGridBaseFutures(BybitStrategy):
 
 
                 logging.info(f"Max USD value: {self.max_usd_value}")
-            
+
                 # Log which thread is running this part of the code
                 thread_id = threading.get_ident()
                 logging.info(f"[Thread ID: {thread_id}] In while true loop {symbol}")
@@ -272,7 +274,7 @@ class LinearGridBaseFutures(BybitStrategy):
                 # Fetch open symbols every loop
                 open_position_data = self.retry_api_call(self.exchange.get_all_open_positions_bybit)
 
-                
+
                 #logging.info(f"Open position data for {symbol}: {open_position_data}")
 
                 position_details = {}
@@ -291,7 +293,7 @@ class LinearGridBaseFutures(BybitStrategy):
                         # Initialize the nested dictionary if the position_symbol is not already in position_details
                         if position_symbol not in position_details:
                             position_details[position_symbol] = {
-                                'long': {'qty': 0, 'avg_price': 0, 'liq_price': None}, 
+                                'long': {'qty': 0, 'avg_price': 0, 'liq_price': None},
                                 'short': {'qty': 0, 'avg_price': 0, 'liq_price': None}
                             }
 
@@ -324,7 +326,8 @@ class LinearGridBaseFutures(BybitStrategy):
                 # logging.info(f"{symbol} last update time: {position_last_update_time}")
 
                 # Fetch equity data
-                fetched_total_equity = self.retry_api_call(self.exchange.get_futures_balance_bybit)
+                # fetched_total_equity = self.retry_api_call(self.exchange.get_futures_balance_bybit)
+                fetched_total_equity = state.balance['total']
 
                 logging.info(f"Fetched total equity: {fetched_total_equity}")
 
@@ -335,30 +338,32 @@ class LinearGridBaseFutures(BybitStrategy):
                     logging.warning(f"Fetched total equity could not be converted to float: {fetched_total_equity}. Resorting to last known equity.")
                     fetched_total_equity = None
 
+                last_equity_fetch_time = state.balance['updated_at']
+
                 # Refresh equity if interval passed or fetched equity is 0.0
-                if current_time - last_equity_fetch_time > equity_refresh_interval or fetched_total_equity == 0.0:
-                    if fetched_total_equity is not None and fetched_total_equity > 0.0:
-                        total_equity = fetched_total_equity
-                        self.last_known_equity = total_equity  # Update the last known equity
-                    else:
-                        logging.warning("Failed to fetch valid total_equity or received 0.0. Using last known value.")
-                        total_equity = self.last_known_equity  # Use last known equity
+                if current_time - last_equity_fetch_time > equity_refresh_interval or fetched_total_equity == 0.0 or fetched_total_equity is None:
+                    logging.error("This should not happen as total_equity should never be None. Skipping this iteration.")
+                    time.sleep(10)  # wait for a short period before retrying
+                    continue
 
-                    available_equity = self.retry_api_call(self.exchange.get_available_balance_bybit)
-                    last_equity_fetch_time = current_time
+                if fetched_total_equity is not None and fetched_total_equity > 0.0:
+                    total_equity = fetched_total_equity
+                    self.last_known_equity = total_equity  # Update the last known equity
+                else:
+                    logging.warning("Failed to fetch valid total_equity or received 0.0. Using last known value.")
+                    total_equity = self.last_known_equity  # Use last known equity
 
-                    logging.info(f"Total equity: {total_equity}")
-                    logging.info(f"Available equity: {available_equity}")
-                    
-                    # Log the type of total_equity
-                    logging.info(f"Type of total_equity: {type(total_equity)}")
+                # available_equity = self.retry_api_call(self.exchange.get_available_balance_bybit)
+                available_equity = state.balance['available']
+                # last_equity_fetch_time = current_time
 
-                    # If total_equity is still None (which it shouldn't be), log an error and skip the iteration
-                    if total_equity is None:
-                        logging.error("This should not happen as total_equity should never be None. Skipping this iteration.")
-                        time.sleep(10)  # wait for a short period before retrying
-                        continue
-                    
+                logging.info(f"Total equity: {total_equity}")
+                logging.info(f"Available equity: {available_equity}")
+
+                # Log the type of total_equity
+                logging.info(f"Type of total_equity: {type(total_equity)}")
+
+
                 blacklist = self.config.blacklist
                 if symbol in blacklist:
                     logging.info(f"Symbol {symbol} is in the blacklist. Stopping operations for this symbol.")
@@ -434,7 +439,7 @@ class LinearGridBaseFutures(BybitStrategy):
                 logging.info(f"Current rotator symbols: {rotator_symbols_standardized}")
                 symbols_to_manage = [s for s in open_symbols if s not in rotator_symbols_standardized]
                 logging.info(f"Symbols to manage {symbols_to_manage}")
-                
+
                 #logging.info(f"Open orders for {symbol}: {open_orders}")
 
                 logging.info(f"Symbols allowed: {self.symbols_allowed}")
@@ -471,7 +476,7 @@ class LinearGridBaseFutures(BybitStrategy):
 
                 logging.info(f"Current long pos qty for {symbol} {long_pos_qty}")
                 logging.info(f"Current short pos qty for {symbol} {short_pos_qty}")
-            
+
                 if previous_long_pos_qty > 0 and long_pos_qty == 0:
                     logging.info(f"Long position closed for {symbol}. Canceling long grid orders.")
                     self.cancel_grid_orders(symbol, "buy")
@@ -494,14 +499,14 @@ class LinearGridBaseFutures(BybitStrategy):
                 try:
                     logging.info(f"Checking position inactivity")
                     # Check for position inactivity
-                    inactive_pos_time_threshold = 60 
+                    inactive_pos_time_threshold = 60
                     if self.check_position_inactivity(symbol, inactive_pos_time_threshold, long_pos_qty, short_pos_qty, previous_long_pos_qty, previous_short_pos_qty):
                         logging.info(f"No open positions for {symbol} in the last {inactive_pos_time_threshold} seconds. Terminating the thread.")
                         shared_symbols_data.pop(symbol, None)
                         break
                 except Exception as e:
                     logging.info(f"Exception caught in check_position_inactivity {e}")
-       
+
                 # Optionally, break out of the loop if all trading sides are closed
                 if not self.running_long and not self.running_short:
                     shared_symbols_data.pop(symbol, None)
@@ -512,7 +517,7 @@ class LinearGridBaseFutures(BybitStrategy):
                     self.cleanup_before_termination(symbol)
                     logging.info("Both long and short operations have terminated. Exiting the loop.")
                     break
-                
+
                 # Determine if positions have just been closed
                 if previous_long_pos_qty > 0 and long_pos_qty == 0:
                     logging.info(f"All long positions for {symbol} were recently closed. Checking for inactivity.")
@@ -582,7 +587,7 @@ class LinearGridBaseFutures(BybitStrategy):
                     logging.info(f"Short liquidation price for {symbol}: {short_liquidation_price}")
 
                     logging.info(f"Rotator symbol trading: {symbol}")
-                                
+
                     logging.info(f"Rotator symbols: {rotator_symbols_standardized}")
                     logging.info(f"Open symbols: {open_symbols}")
 
@@ -705,7 +710,7 @@ class LinearGridBaseFutures(BybitStrategy):
                         )
                     except Exception as e:
                         logging.info(f"Hardened grid AR exception caught {e}")
-                        
+
                     self.auto_reduce_percentile_logic(
                         symbol,
                         long_pos_qty,
@@ -811,7 +816,7 @@ class LinearGridBaseFutures(BybitStrategy):
                         should_add_to_long = long_pos_price > ma_6_high and self.long_trade_condition(best_bid_price, ma_6_low)
 
                     logging.info(f"Five minute volume for {symbol} : {five_minute_volume}")
-                        
+
                     # historical_data = self.fetch_historical_data(
                     #     symbol,
                     #     timeframe='4h'
@@ -958,7 +963,7 @@ class LinearGridBaseFutures(BybitStrategy):
                                 tp_order_counts=tp_order_counts,
                                 open_orders=open_orders
                             )
-                            
+
 
                     if self.test_orders_enabled and current_time - self.last_helper_order_cancel_time >= self.helper_interval:
                         if symbol in open_symbols:
@@ -966,7 +971,7 @@ class LinearGridBaseFutures(BybitStrategy):
                             self.helperv2(symbol, short_dynamic_amount_helper, long_dynamic_amount_helper)
                         else:
                             logging.info(f"Skipping test orders for {symbol} as it's not in open symbols list.")
-                            
+
                     # # Check if the symbol should terminate
                     # if self.should_terminate_full(symbol, current_time, previous_long_pos_qty, long_pos_qty, previous_short_pos_qty, short_pos_qty):
                     #     self.cleanup_before_termination(symbol)
@@ -977,14 +982,14 @@ class LinearGridBaseFutures(BybitStrategy):
                         logging.info("Both long and short operations have ended. Preparing to exit loop.")
                         shared_symbols_data.pop(symbol, None)  # Remove the symbol from shared symbols data
                         # This will cause the loop condition to fail naturally without a break, making the code flow cleaner
-                
+
                     # self.cancel_entries_bybit(symbol, best_ask_price, moving_averages["ma_1m_3_high"], moving_averages["ma_5m_3_high"])
                     # self.cancel_stale_orders_bybit(symbol)
-                    
+
                 time.sleep(5)
 
                 dashboard_path = os.path.join(self.config.shared_data_path, "shared_data.json")
-                
+
                 symbol_data = {
                     'symbol': symbol,
                     'min_qty': min_qty,
@@ -1047,7 +1052,7 @@ class LinearGridBaseFutures(BybitStrategy):
                         # Handle other I/O errors
                     except Exception as e:
                         logging.info(f"An unexpected error occurred in saving json: {e}")
-                        
+
                 iteration_end_time = time.time()  # Record the end time of the iteration
                 iteration_duration = iteration_end_time - iteration_start_time
                 logging.info(f"Iteration for symbol {symbol} took {iteration_duration:.2f} seconds")

@@ -4,6 +4,7 @@ import time
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
+import state
 
 shared_symbols_data = {}
 
@@ -15,7 +16,7 @@ class LiveTableManager:
 
     def generate_table(self) -> Table:
         table = Table(show_header=True, header_style="bold blue", title="DirectionalScalper")
-       
+
         table.add_column("Symbol", style="cyan", min_width=12)
         table.add_column("Min. Qty")
         table.add_column("Price")
@@ -35,7 +36,7 @@ class LiveTableManager:
         current_time = datetime.datetime.now().strftime('%H:%M:%S %d-%m-%Y')
         last_symbol_data = list(shared_symbols_data.values())[-1] if shared_symbols_data else None
         if last_symbol_data:
-            balance = "{:.4f}".format(float(last_symbol_data.get('balance') or 0))
+            total_balance = "{:.4f}".format(float(last_symbol_data.get('balance') or 0))
             available_bal = "{:.4f}".format(float(last_symbol_data.get('available_bal') or 0))
             total_upnl = "{:.4f}".format(sum((symbol_data.get('long_upnl') or 0) + (symbol_data.get('short_upnl') or 0) for symbol_data in shared_symbols_data.values()))
             # Styling
@@ -43,7 +44,11 @@ class LiveTableManager:
             upnl_style = "[italic]" if upnl_value > 9 or upnl_value < -9.5 else "[bold]" if upnl_value > 3.5 or upnl_value < -3.5 else ""
             upnl_color = "[green]" if upnl_value > 1 else "[red]" if upnl_value < -1 else "[grey]"
             styled_upnl = f"{upnl_style}{upnl_color}{total_upnl}[/]"
-            table.caption = f"Balance: {balance} | Available: {available_bal} | Total uPnL: {styled_upnl} | Updated: {current_time}"
+            table.caption = f"Balance: {total_balance} | Available: {available_bal} | Total uPnL: {styled_upnl} | Updated: {current_time}"
+        elif state.balance:
+            total_balance = "{:.4f}".format(float(state.balance['total'] or 0))
+            available_bal = "{:.4f}".format(float(state.balance['available'] or 0))
+            table.caption = f"Balance: {total_balance} | Available: {available_bal} | Total uPnL: loading... | Updated: {current_time}"
         else:
             table.caption = f"Loading... {len(shared_symbols_data)} symbols loaded | Updated: {current_time}"
 
@@ -55,7 +60,7 @@ class LiveTableManager:
                 x['symbol']  # Then sort by symbol name
             )
         )
-        
+
         for symbol_data in sorted_symbols:
             long_pos_qty = symbol_data.get('long_pos_qty', 0)
             short_pos_qty = symbol_data.get('short_pos_qty', 0)
@@ -63,7 +68,7 @@ class LiveTableManager:
             short_upnl = round(symbol_data.get('short_upnl', 0) or 0, 2)
 
             # Determine if the entire row should be bold
-            is_symbolrowalive = long_pos_qty > 0 or short_pos_qty > 0 
+            is_symbolrowalive = long_pos_qty > 0 or short_pos_qty > 0
 
             # Helper function to format the cell
             def format_cell(value, is_bold=is_symbolrowalive, is_highlight=False):
