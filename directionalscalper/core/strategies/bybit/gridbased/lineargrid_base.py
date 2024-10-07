@@ -327,7 +327,7 @@ class LinearGridBaseFutures(BybitStrategy):
 
                 # Fetch equity data
                 # fetched_total_equity = self.retry_api_call(self.exchange.get_futures_balance_bybit)
-                fetched_total_equity = state.balance['total']
+                fetched_total_equity = state.balance.get('total')
 
                 logging.info(f"Fetched total equity: {fetched_total_equity}")
 
@@ -338,10 +338,10 @@ class LinearGridBaseFutures(BybitStrategy):
                     logging.warning(f"Fetched total equity could not be converted to float: {fetched_total_equity}. Resorting to last known equity.")
                     fetched_total_equity = None
 
-                last_equity_fetch_time = state.balance['updated_at']
+                last_equity_fetch_time = state.balance.get('updated_at')
 
                 # Refresh equity if interval passed or fetched equity is 0.0
-                if current_time - last_equity_fetch_time > equity_refresh_interval or fetched_total_equity == 0.0 or fetched_total_equity is None:
+                if not last_equity_fetch_time or current_time - last_equity_fetch_time > equity_refresh_interval or fetched_total_equity == 0.0 or fetched_total_equity is None:
                     logging.error("This should not happen as total_equity should never be None. Skipping this iteration.")
                     time.sleep(10)  # wait for a short period before retrying
                     continue

@@ -341,6 +341,7 @@ class DirectionalMarketMakerWs:
         while not self.stop_ws:
             try:
                 ws_balance = await exchange.watch_balance()
+                print(ws_balance)
                 state.balance = { **ws_balance }
                 state.balance['total'] = ws_balance['info'][0]['totalWalletBalance']
                 state.balance['available'] = ws_balance['info'][0]['totalAvailableBalance']
@@ -1332,7 +1333,7 @@ blacklist = []
 max_usd_value = 100
 
 async def main():
-    global whitelist, blacklist, max_usd_value, market_maker, manager, symbols_allowed
+    global whitelist, blacklist, max_usd_value, market_maker
 
     sword = f"{Fore.CYAN}====={Fore.WHITE}||{Fore.RED}====>"
 
@@ -1476,6 +1477,7 @@ async def main():
             except Exception as e:
                 logging.info(f"Exception caught in main loop: {e}")
                 logging.info(traceback.format_exc())
+
 
     await asyncio.gather(
         market_maker.subscribe_to_ws(),
