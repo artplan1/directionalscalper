@@ -509,7 +509,7 @@ def bybit_auto_rotation(args, market_maker, manager, symbols_allowed):
             current_short_positions = sum(1 for pos in open_position_data if pos['side'].lower() == 'short')
             logging.info(f"Current long positions: {current_long_positions}, Current short positions: {current_short_positions}")
 
-            update_active_symbols(open_position_symbols)
+            update_active_symbols(args, manager, open_position_symbols)
             unique_active_symbols = active_long_symbols.union(active_short_symbols)
 
             if config_auto_graceful_stop:
@@ -544,7 +544,7 @@ def bybit_auto_rotation(args, market_maker, manager, symbols_allowed):
                 open_position_futures = []
                 signal_futures = []
 
-                update_active_symbols(open_position_symbols)
+                update_active_symbols(args, manager, open_position_symbols)
                 unique_active_symbols = active_long_symbols.union(active_short_symbols)
                 logging.info(f"Active symbols updated. Long symbols allowed: {symbols_allowed}, Short symbols allowed: {symbols_allowed}")
                 logging.info(f"Active symbols: {active_symbols}")
@@ -711,7 +711,7 @@ def bybit_auto_rotation_spot(args, market_maker, manager, symbols_allowed):
             else:
                 logging.debug(f"No refresh needed yet. Last update was at {last_rotator_update_time}, less than 60 seconds ago.")
 
-            update_active_symbols(open_position_symbols)
+            update_active_symbols(args, manager, open_position_symbols)
             logging.info(f"Active symbols: {active_symbols}")
             logging.info(f"Active symbols updated. Symbols allowed: {symbols_allowed}")
 
@@ -1056,11 +1056,11 @@ def start_thread_for_symbol_spot(symbol, args, market_maker, manager, signal, ac
     return True
 
 
-def update_active_symbols(open_position_symbols):
+def update_active_symbols(args, manager, open_position_symbols):
     global active_symbols, active_long_symbols, active_short_symbols, unique_active_symbols
     active_symbols = open_position_symbols
-    active_long_symbols = {symbol for symbol in open_position_symbols if is_long_position(symbol)}
-    active_short_symbols = {symbol for symbol in open_position_symbols if is_short_position(symbol)}
+    active_long_symbols = {symbol for symbol in open_position_symbols if is_long_position(args, manager, symbol)}
+    active_short_symbols = {symbol for symbol in open_position_symbols if is_short_position(args, manager, symbol)}
     unique_active_symbols = active_long_symbols.union(active_short_symbols)
     logging.info(f"Updated active symbols ({len(active_symbols)}): {active_symbols}")
     logging.info(f"Updated active long symbols ({len(active_long_symbols)}): {active_long_symbols}")
@@ -1118,13 +1118,13 @@ def manage_excess_threads(symbols_allowed):
         logging.info(f"Removed excess short thread for symbol: {symbol_to_remove}")
         excess_short_count -= 1
 
-def is_long_position(symbol):
+def is_long_position(args, manager, symbol):
     pos_data = getattr(manager.exchange, f"get_all_open_positions_{args.exchange.lower()}")()
     is_long = any(standardize_symbol(pos['symbol']) == symbol and pos['side'].lower() == 'long' for pos in pos_data)
     logging.debug(f"Checked if {symbol} is a long position: {is_long}")
     return is_long
 
-def is_short_position(symbol):
+def is_short_position(args, manager, symbol):
     pos_data = getattr(manager.exchange, f"get_all_open_positions_{args.exchange.lower()}")()
     is_short = any(standardize_symbol(pos['symbol']) == symbol and pos['side'].lower() == 'short' for pos in pos_data)
     logging.debug(f"Checked if {symbol} is a short position: {is_short}")
@@ -1327,7 +1327,13 @@ init(autoreset=True)
 import signal
 import sys
 
+whilelist = []
+blacklist = []
+max_usd_value = 100
+
 async def main():
+    global whitelist, blacklist, max_usd_value, market_maker, manager, symbols_allowed
+
     sword = f"{Fore.CYAN}====={Fore.WHITE}||{Fore.RED}====>"
 
     print("\n" + Fore.YELLOW + "=" * 60)
@@ -1429,56 +1435,52 @@ async def main():
     display_thread.daemon = True
     display_thread.start()
 
-    await market_maker.subscribe_to_ws()
+    def execution_loop(manager):
+        global whitelist, blacklist, max_usd_value
 
-    async def signal_handler(sig, frame):
-        print("Interrupt received, closing WebSocket...")
-        await market_maker.cleanup()
+        logging.info('Starting execution loop')
 
-    signal.signal(signal.SIGINT, signal_handler)
+        # Removed redundant calls and initialization
+        while True:
+            try:
+                whitelist = config.bot.whitelist
+                blacklist = config.bot.blacklist
+                max_usd_value = config.bot.max_usd_value
 
-    # Removed redundant calls and initialization
-    while True:
-        try:
-            whitelist = config.bot.whitelist
-            blacklist = config.bot.blacklist
-            max_usd_value = config.bot.max_usd_value
+                match exchange_name.lower():
+                    case 'bybit':
+                        bybit_auto_rotation(args, market_maker, manager, symbols_allowed)
+                    case 'bybit_spot':
+                        bybit_auto_rotation_spot(args, market_maker, manager, symbols_allowed)
+                    case 'blofin':
+                        blofin_auto_rotation(args, market_maker, manager, symbols_allowed)
+                    case 'hyperliquid':
+                        hyperliquid_auto_rotation(args, market_maker, manager, symbols_allowed)
+                    case 'huobi':
+                        huobi_auto_rotation(args, manager, market_maker, symbols_allowed)
+                    case 'bitget':
+                        bitget_auto_rotation(args, manager, market_maker, symbols_allowed)
+                    case 'binance':
+                        binance_auto_rotation(args, manager, market_maker, symbols_allowed)
+                    case 'mexc':
+                        mexc_auto_rotation(args, manager, market_maker, symbols_allowed)
+                    case 'lbank':
+                        lbank_auto_rotation(args, manager, market_maker, symbols_allowed)
+                    case _:
+                        logging.warning(f"Auto-rotation not implemented for exchange: {exchange_name}")
 
-            match exchange_name.lower():
-                case 'bybit':
-                    bybit_auto_rotation(args, market_maker, manager, symbols_allowed)
-                case 'bybit_spot':
-                    bybit_auto_rotation_spot(args, market_maker, manager, symbols_allowed)
-                case 'blofin':
-                    blofin_auto_rotation(args, market_maker, manager, symbols_allowed)
-                case 'hyperliquid':
-                    hyperliquid_auto_rotation(args, market_maker, manager, symbols_allowed)
-                case 'huobi':
-                    huobi_auto_rotation(args, manager, market_maker, symbols_allowed)
-                case 'bitget':
-                    bitget_auto_rotation(args, manager, market_maker, symbols_allowed)
-                case 'binance':
-                    binance_auto_rotation(args, manager, market_maker, symbols_allowed)
-                case 'mexc':
-                    mexc_auto_rotation(args, manager, market_maker, symbols_allowed)
-                case 'lbank':
-                    lbank_auto_rotation(args, manager, market_maker, symbols_allowed)
-                case _:
-                    logging.warning(f"Auto-rotation not implemented for exchange: {exchange_name}")
+                logging.info(f"Active symbols: {active_symbols}")
+                logging.info(f"Total active symbols: {len(active_symbols)}")
 
-            logging.info(f"Active symbols: {active_symbols}")
-            logging.info(f"Total active symbols: {len(active_symbols)}")
+                time.sleep(10)
+            except Exception as e:
+                logging.info(f"Exception caught in main loop: {e}")
+                logging.info(traceback.format_exc())
 
-            time.sleep(10)
-        except Exception as e:
-            logging.info(f"Exception caught in main loop: {e}")
-            logging.info(traceback.format_exc())
+    await asyncio.gather(
+        market_maker.subscribe_to_ws(),
+        asyncio.to_thread(execution_loop, manager)
+    )
 
-
-runner = asyncio.run(main())
-
-def exit_handler():
-    runner.close()
-
-signal.signal(signal.SIGINT, exit_handler)
-
+if __name__ == '__main__':
+    asyncio.run(main())
