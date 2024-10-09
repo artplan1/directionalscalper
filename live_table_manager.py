@@ -103,8 +103,8 @@ class LiveTableManager:
 
     def display_table(self):
         console = Console()
-        with Live(self.table, refresh_per_second=1/3) as live:
+        with Live(self.table, auto_refresh=False) as live:
             while True:
                 time.sleep(3)
                 with self.lock:
-                    live.update(self.generate_table())
+                    live.update(self.generate_table(), refresh=True)

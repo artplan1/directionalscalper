@@ -213,7 +213,7 @@ class DirectionalMarketMakerWs:
         if symbols_to_trade:
             logging.info(f"Calling run method with symbols: {symbols_to_trade}")
             try:
-                print_cool_trading_info(symbol, self.exchange_name, strategy_name, account_name)
+                # print_cool_trading_info(symbol, self.exchange_name, strategy_name, account_name)
                 logging.info(f"Printed trading info for {symbol}")
             except Exception as e:
                 logging.error(f"Error in printing info: {e}")
@@ -296,10 +296,6 @@ class DirectionalMarketMakerWs:
         logging.info(f"Invalid symbol type for some reason according to bybit but is probably valid symbol: {symbol}")
         return True
 
-    def fetch_open_orders(self, symbol):
-        with general_rate_limiter:
-            return self.exchange.retry_api_call(self.exchange.get_open_orders, symbol)
-
     def get_signal(self, symbol):
         if self.entry_signal_type == 'mfirsi_signal':
             logging.info(f"Using mfirsi signals for symbol {symbol}")
@@ -341,9 +337,8 @@ class DirectionalMarketMakerWs:
         while not self.stop_ws:
             try:
                 ws_balance = await exchange.watch_balance()
-                print(ws_balance)
                 state.balance = { **ws_balance }
-                state.balance['total'] = ws_balance['info'][0]['totalWalletBalance']
+                state.balance['total'] = ws_balance['info'][0]['totalEquity']
                 state.balance['available'] = ws_balance['info'][0]['totalAvailableBalance']
                 state.balance['updated_at'] = exchange.milliseconds()
             except Exception as e:
@@ -1333,7 +1328,7 @@ blacklist = []
 max_usd_value = 100
 
 async def main():
-    global whitelist, blacklist, max_usd_value, market_maker
+    global whitelist, blacklist, max_usd_value, market_maker, symbols_allowed
 
     sword = f"{Fore.CYAN}====={Fore.WHITE}||{Fore.RED}====>"
 
