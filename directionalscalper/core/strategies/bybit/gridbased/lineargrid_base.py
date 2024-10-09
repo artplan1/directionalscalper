@@ -325,9 +325,13 @@ class LinearGridBaseFutures(BybitStrategy):
 
                 # logging.info(f"{symbol} last update time: {position_last_update_time}")
 
-                # Fetch equity data
-                # fetched_total_equity = self.retry_api_call(self.exchange.get_futures_balance_bybit)
                 fetched_total_equity = state.balance.get('total')
+                last_equity_fetch_time = state.balance.get('updated_at')
+
+                if not fetched_total_equity:
+                    # Fetch equity data
+                    fetched_total_equity = self.retry_api_call(self.exchange.get_futures_balance_bybit)
+                    last_equity_fetch_time = current_time
 
                 logging.info(f"Fetched total equity: {fetched_total_equity}")
 
@@ -337,8 +341,6 @@ class LinearGridBaseFutures(BybitStrategy):
                 except (ValueError, TypeError):
                     logging.warning(f"Fetched total equity could not be converted to float: {fetched_total_equity}. Resorting to last known equity.")
                     fetched_total_equity = None
-
-                last_equity_fetch_time = state.balance.get('updated_at')
 
                 # Refresh equity if interval passed or fetched equity is 0.0
                 if not last_equity_fetch_time or current_time - last_equity_fetch_time > equity_refresh_interval or fetched_total_equity == 0.0 or fetched_total_equity is None:
@@ -353,9 +355,12 @@ class LinearGridBaseFutures(BybitStrategy):
                     logging.warning("Failed to fetch valid total_equity or received 0.0. Using last known value.")
                     total_equity = self.last_known_equity  # Use last known equity
 
-                # available_equity = self.retry_api_call(self.exchange.get_available_balance_bybit)
-                available_equity = state.balance['available']
-                # last_equity_fetch_time = current_time
+                available_equity = state.balance.get('available')
+
+                if not available_equity:
+                    logging.warning("Failed to fetch valid available_equity. Using last known value.")
+                    available_equity = self.retry_api_call(self.exchange.get_available_balance_bybit)
+                    last_equity_fetch_time = current_time
 
                 logging.info(f"Total equity: {total_equity}")
                 logging.info(f"Available equity: {available_equity}")

@@ -38,7 +38,7 @@ class BybitExchange(Exchange):
         self.last_active_time = {}
         self.rate_limiter = RateLimit(10, 1)
         self.general_rate_limiter = RateLimit(50, 1)
-        self.order_rate_limiter = RateLimit(5, 1) 
+        self.order_rate_limiter = RateLimit(5, 1)
         self.collateral_currency = collateral_currency
 
     def log_order_active_times(self):
@@ -59,7 +59,7 @@ class BybitExchange(Exchange):
         if symbol not in self.last_active_time:
             self.last_active_time[symbol] = time.time()
             logging.info(f"Started monitoring {symbol} at {self.last_active_time[symbol]}")
-     
+
     def get_symbol_info_and_positions(self, symbol: str):
         try:
             # Fetch the market info for the given symbol
@@ -100,7 +100,7 @@ class BybitExchange(Exchange):
             with self.general_rate_limiter:
                 self.exchange.load_markets()
                 symbol_data = self.exchange.market(symbol)
-                
+
                 if "info" in symbol_data:
                     values["precision"] = symbol_data["precision"]["price"]
                     values["min_qty"] = symbol_data["limits"]["amount"]["min"]
@@ -116,16 +116,16 @@ class BybitExchange(Exchange):
             logging.info(f"An unknown error occurred in get_market_data_bybit(): {e}")
             # Uncomment if you want to log the traceback for debugging
             #logging.info(f"Call Stack: {traceback.format_exc()}")
-        
-        return values       
+
+        return values
     # def get_market_data_bybit(self, symbol: str) -> dict:
     #     values = {"precision": 0.0, "leverage": 0.0, "min_qty": 0.0}
     #     try:
     #         self.exchange.load_markets()
     #         symbol_data = self.exchange.market(symbol)
-            
+
     #         #print("Symbol data:", symbol_data)  # Debug print
-            
+
     #         if "info" in symbol_data:
     #             values["precision"] = symbol_data["precision"]["price"]
     #             values["min_qty"] = symbol_data["limits"]["amount"]["min"]
@@ -160,7 +160,7 @@ class BybitExchange(Exchange):
     def get_all_open_orders_bybit(self):
         """
         Fetch all open orders for all symbols from the Bybit API.
-        
+
         :return: A list of open orders for all symbols.
         """
         try:
@@ -236,7 +236,7 @@ class BybitExchange(Exchange):
                 logging.info(f"Error fetching available balance from Bybit: {e}")
 
         return None
-    
+
 
     def get_balance_bybit_unified(self, quote):
         if self.exchange.has['fetchBalance']:
@@ -246,12 +246,12 @@ class BybitExchange(Exchange):
             # Find the quote balance
             unified_balance = balance.get('USDT', {})
             total_balance = unified_balance.get('total', None)
-            
+
             if total_balance is not None:
                 return float(total_balance)
 
         return None
-    
+
     def create_limit_order_bybit(self, symbol: str, side: str, qty: float, price: float, positionIdx=0, params={}):
         try:
             if side == "buy" or side == "sell":
@@ -278,7 +278,7 @@ class BybitExchange(Exchange):
                 'timeInForce': 'PostOnly',  # Set the order as a PostOnly order
                 'isLeverage': isLeverage,   # Specify whether to borrow for margin trading
             }
-            
+
             # If 'orderLinkId' is provided, add it to the 'params' dictionary
             if orderLinkId:
                 params['orderLinkId'] = orderLinkId
@@ -292,18 +292,18 @@ class BybitExchange(Exchange):
                 price=price,
                 params=params
             )
-            
+
             return order
         except Exception as e:
             logging.info(f"An error occurred while creating limit order on Bybit: {e}")
             return None
-        
+
     def create_tagged_limit_order_bybit(self, symbol: str, side: str, qty: float, price: float, positionIdx=0, isLeverage=False, orderLinkId=None, postOnly=True, params={}):
         try:
             # Directly prepare the parameters required by the `create_order` method
             order_type = "limit"  # For limit orders
             time_in_force = "PostOnly" if postOnly else "GTC"
-            
+
             # Include additional parameters
             extra_params = {
                 "positionIdx": positionIdx,
@@ -313,7 +313,7 @@ class BybitExchange(Exchange):
                 extra_params["isLeverage"] = 1
             if orderLinkId:
                 extra_params["orderLinkId"] = orderLinkId
-            
+
             # Merge any additional user-provided parameters
             extra_params.update(params)
 
@@ -341,7 +341,7 @@ class BybitExchange(Exchange):
             logging.info(f"An error occurred in create_tagged_limit_order_bybit() for {symbol}: {e}")
             return {"error": str(e)}
 
-        
+
     def create_limit_order_bybit_unified(self, symbol: str, side: str, qty: float, price: float, positionIdx=0, params={}):
         try:
             if side == "buy" or side == "sell":
@@ -387,19 +387,19 @@ class BybitExchange(Exchange):
         try:
             logging.info(f"cancel_all_open_orders_bybit called")
             params = {'category': category}  # Specify additional parameters as needed
-            
+
             # Optionally, add symbol to request if provided
             if symbol is not None:
                 market = self.exchange.market(symbol)
                 params['symbol'] = market['id']
 
             response = self.exchange.cancel_all_orders(params=params)
-            
+
             logging.info(f"Successfully cancelled orders {response}")
             return response
         except Exception as e:
             logging.info(f"Error cancelling orders: {e}")
-            
+
     def cancel_order_bybit(self, order_id, symbol):
         """
         Wrapper function to cancel an order on the exchange using the CCXT instance.
@@ -417,7 +417,7 @@ class BybitExchange(Exchange):
             logging.info(f"An error occurred while cancelling order {order_id} for {symbol}: {str(e)}")
             # Handle the exception as needed (e.g., retry, raise, etc.)
             return None
-        
+
     def get_precision_and_limits_bybit(self, symbol):
         # Fetch the market data
         markets = self.exchange.fetch_markets()
@@ -436,7 +436,7 @@ class BybitExchange(Exchange):
     def get_market_precision_data_bybit(self, symbol):
         # Fetch the market data
         markets = self.exchange.fetch_markets()
-        
+
         # Print the first market from the list
         logging.info(markets[0])
 
@@ -444,9 +444,9 @@ class BybitExchange(Exchange):
         for market in markets:
             if market['symbol'] == symbol:
                 return market['precision']
-        
+
         return None
-    
+
     def transfer_funds_bybit(self, code: str, amount: float, from_account: str, to_account: str, params={}):
         """
         Transfer funds between different account types under the same UID.
@@ -478,7 +478,7 @@ class BybitExchange(Exchange):
         except Exception as e:
             logging.info(f"Error occurred during funds transfer: {e}")
             return None
-        
+
     def transfer_funds(self, code: str, amount: float, from_account: str, to_account: str, params={}):
         """
         Transfer funds between different account types under the same UID.
@@ -532,7 +532,7 @@ class BybitExchange(Exchange):
                 if self.collateral_currency == 'all' and 'info' in balance_response:
                     logging.info("quote is not set - pulling total balance from total equity")
 
-                    total_balance = balance_response['info']['result']['list'][0]['totalWalletBalance']
+                    total_balance = balance_response['info']['result']['list'][0]['totalEquity']
                     return total_balance
 
                 # Parse the balance
@@ -626,7 +626,7 @@ class BybitExchange(Exchange):
         except Exception as e:
             logging.info(f"Error cancelling open orders for {symbol}: {e}")
             return None
-        
+
     def get_current_max_leverage_bybit(self, symbol):
         try:
             # Fetch leverage tiers for the symbol
@@ -655,7 +655,7 @@ class BybitExchange(Exchange):
         """
         try:
             response = self.exchange.set_margin_mode('cross', symbol=symbol, params={'leverage': leverage})
-            
+
             retCode = response.get('retCode') if isinstance(response, dict) else None
 
             if retCode == 110026:  # Margin mode is already set to cross
@@ -698,7 +698,7 @@ class BybitExchange(Exchange):
                     }
                     all_positions = self.exchange.fetch_positions(params=params)
                     open_positions = [position for position in all_positions if float(position.get('contracts', position.get('size', 0))) != 0]
-                    
+
                     # Update the shared cache with the new data
                     self.open_positions_shared_cache = open_positions
                     self.last_open_positions_time_shared = now
@@ -713,7 +713,7 @@ class BybitExchange(Exchange):
                     else:
                         logging.info(f"Error fetching open positions: {e}")
                         return []
-                    
+
     def get_all_open_positions_bybit(self, retries=10, delay_factor=10, max_delay=60) -> List[dict]:
         now = datetime.now()
 
@@ -730,9 +730,9 @@ class BybitExchange(Exchange):
 
             for attempt in range(retries):
                 try:
-                    # all_positions = self.exchange.fetch_positions() 
+                    # all_positions = self.exchange.fetch_positions()
                     all_positions = self.exchange.fetch_positions(params={'limit': 200})
-                    open_positions = [position for position in all_positions if float(position.get('contracts', 0)) != 0] 
+                    open_positions = [position for position in all_positions if float(position.get('contracts', 0)) != 0]
 
                     # Update the shared cache with the new data
                     self.open_positions_shared_cache = open_positions
@@ -741,7 +741,7 @@ class BybitExchange(Exchange):
                     return open_positions
                 except Exception as e:
                     is_rate_limit_error = "Too many visits" in str(e) or (hasattr(e, 'response') and e.response.status_code == 403)
-                    
+
                     if is_rate_limit_error and attempt < retries - 1:
                         delay = min(delay_factor * (attempt + 1), max_delay)  # Exponential delay with a cap
                         logging.info(f"Rate limit on get_all_open_positions_bybit hit, waiting for {delay} seconds before retrying...")
@@ -771,7 +771,7 @@ class BybitExchange(Exchange):
                     }
                     all_positions = self.exchange.fetch_positions(params=params)
                     open_positions = [position for position in all_positions if float(position.get('contracts', position.get('size', 0))) != 0]
-                    
+
                     # Update the shared cache with the new data
                     self.open_positions_shared_cache = open_positions
                     self.last_open_positions_time_shared = now
@@ -786,7 +786,7 @@ class BybitExchange(Exchange):
                     else:
                         logging.info(f"Error fetching open positions: {e}")
                         return []
-                    
+
     def fetch_leverage_tiers(self, symbol: str) -> dict:
         """
         Fetch leverage tiers for a given symbol using CCXT's fetch_market_leverage_tiers method.
@@ -805,22 +805,22 @@ class BybitExchange(Exchange):
     def get_open_take_profit_orders(self, symbol, side):
         """
         Fetches open take profit orders for the given symbol and side.
-        
+
         :param str symbol: The trading pair symbol.
         :param str side: The side ("buy" or "sell") of the TP orders to fetch.
         :return: A list of take profit order structures.
         """
         # First, fetch the open orders
         response = self.exchange.get_open_orders(symbol)
-        
+
         # Filter the orders for take profits (reduceOnly) and the specified side
         tp_orders = [
             order for order in response
             if order.get('info', {}).get('reduceOnly', False) and order.get('side', '').lower() == side.lower()
         ]
-        
+
         # If necessary, you can further parse the orders here using self.parse_order or similar methods
-        
+
         return tp_orders
 
     # def get_all_open_orders(self):
@@ -936,13 +936,13 @@ class BybitExchange(Exchange):
                 'qty': float(order['info']['qty']),
                 'price': float(order['price'])  # Extracting the price
             }
-            
+
             if order['info'].get('reduceOnly', False):
                 if order['side'] == 'sell':
                     long_tp_orders.append(order_details)
                 elif order['side'] == 'buy':
                     short_tp_orders.append(order_details)
-        
+
         return long_tp_orders, short_tp_orders
 
 
@@ -963,9 +963,9 @@ class BybitExchange(Exchange):
         side = side.lower()
         side_map = {"long": "buy", "short": "sell"}
         side = side_map.get(side, side)
-        
+
         position_idx_map = {"buy": 1, "sell": 2}
-        
+
         retries = 0
         while retries < max_retries:
             try:
@@ -1013,7 +1013,7 @@ class BybitExchange(Exchange):
             return self.create_limit_order_bybit(symbol, side, amount, price, positionIdx=positionIdx, params=params)
         else:
             raise ValueError(f"Unsupported order type: {order_type}")
-        
+
     def create_normal_take_profit_order_bybit(self, symbol, order_type, side, amount, price=None, positionIdx=1, reduce_only=True):
         logging.info(f"Calling create_take_profit_order_bybit with symbol={symbol}, order_type={order_type}, side={side}, amount={amount}, price={price}")
         if order_type == 'limit':
@@ -1040,7 +1040,7 @@ class BybitExchange(Exchange):
             return self.create_limit_order_bybit(symbol, side, amount, price, positionIdx=positionIdx, params=params)
         else:
             raise ValueError(f"Unsupported order type: {order_type}")
-        
+
     def create_market_order_bybit_spot(self, symbol: str, side: str, qty: float, marketUnit=None, isLeverage=0, orderLinkId=None, orderFilter=None, takeProfit=None, stopLoss=None, tpOrderType=None, slOrderType=None, tpLimitPrice=None, slLimitPrice=None):
         try:
             # Define the 'params' dictionary to include additional parameters
@@ -1081,7 +1081,7 @@ class BybitExchange(Exchange):
         except Exception as e:
             logging.info(f"An error occurred while creating market order on Bybit: {e}")
             return None
-        
+
     def cancel_order_by_id(self, order_id, symbol):
         try:
             # Call the updated cancel_order method
@@ -1089,12 +1089,12 @@ class BybitExchange(Exchange):
             logging.info(f"Canceled order - ID: {order_id}, Response: {result}")
         except Exception as e:
             logging.info(f"Error occurred in cancel_order_by_id: {e}")
-           
+
     def cancel_take_profit_orders_bybit(self, symbol, side):
         side = side.lower()
         side_map = {"long": "buy", "short": "sell"}
         side = side_map.get(side, side)
-        
+
         try:
             open_orders = self.exchange.fetch_open_orders(symbol)
             position_idx_map = {"buy": 1, "sell": 2}
@@ -1117,7 +1117,7 @@ class BybitExchange(Exchange):
         side_map = {"long": "buy", "short": "sell"}
         side = side_map.get(side, side)
         total_qty = 0
-        
+
         try:
             open_orders = self.exchange.fetch_open_orders(symbol)
             position_idx_map = {"buy": 1, "sell": 2}
@@ -1166,7 +1166,7 @@ class BybitExchange(Exchange):
                 logging.info(f"An error occurred while fetching max leverage: {str(e)}")
 
                 # Wait and retry if not the last attempt
-                if retry < max_retries - 1:  
+                if retry < max_retries - 1:
                     sleep_time = backoff_factor * (2 ** retry)  # Exponential backoff
                     time.sleep(sleep_time)
 
@@ -1212,7 +1212,7 @@ class BybitExchange(Exchange):
             if market['symbol'] == symbol:
                 tick_size = market['info']['priceFilter']['tickSize']
                 return tick_size
-        
+
         return None
 
     def fetch_recent_trades(self, symbol, since=None, limit=100):
