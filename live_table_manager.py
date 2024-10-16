@@ -6,7 +6,7 @@ from rich.live import Live
 from rich.table import Table
 import state
 
-shared_symbols_data = {}
+shared_symbols_data = {} # TODO: move to "state.py"
 
 class LiveTableManager:
     def __init__(self):
@@ -34,11 +34,11 @@ class LiveTableManager:
 
         # Assuming all symbols have **nearly** the same balance and available balance we pick the last symbol to get these values
         current_time = datetime.datetime.now().strftime('%H:%M:%S %d-%m-%Y')
-        last_symbol_data = list(shared_symbols_data.values())[-1] if shared_symbols_data else None
+        last_symbol_data = list(state.shared_symbols_data.values())[-1] if state.shared_symbols_data else None
         if last_symbol_data:
             total_balance = "{:.4f}".format(float(last_symbol_data.get('balance') or 0))
             available_bal = "{:.4f}".format(float(last_symbol_data.get('available_bal') or 0))
-            total_upnl = "{:.4f}".format(sum((symbol_data.get('long_upnl') or 0) + (symbol_data.get('short_upnl') or 0) for symbol_data in shared_symbols_data.values()))
+            total_upnl = "{:.4f}".format(sum((symbol_data.get('long_upnl') or 0) + (symbol_data.get('short_upnl') or 0) for symbol_data in state.shared_symbols_data.values()))
             # Styling
             upnl_value = float(total_upnl)
             upnl_style = "[italic]" if upnl_value > 9 or upnl_value < -9.5 else "[bold]" if upnl_value > 3.5 or upnl_value < -3.5 else ""
@@ -50,11 +50,11 @@ class LiveTableManager:
             available_bal = "{:.4f}".format(float(state.balance['available'] or 0))
             table.caption = f"Balance: {total_balance} | Available: {available_bal} | Total uPnL: loading... | Updated: {current_time}"
         else:
-            table.caption = f"Loading... {len(shared_symbols_data)} symbols loaded | Updated: {current_time}"
+            table.caption = f"Loading... {len(state.shared_symbols_data)} symbols loaded | Updated: {current_time}"
 
         # Sorting symbols
         sorted_symbols = sorted(
-            [symbol_data for symbol_data in shared_symbols_data.values() if symbol_data['symbol'] in shared_symbols_data],
+            [symbol_data for symbol_data in state.shared_symbols_data.values() if symbol_data['symbol'] in state.shared_symbols_data],
             key=lambda x: (
                 -(x.get('long_pos_qty', 0) > 0 or x.get('short_pos_qty', 0) > 0),  # Prioritize symbols with quantities > 0
                 x['symbol']  # Then sort by symbol name

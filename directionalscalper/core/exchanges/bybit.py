@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, List
 from ccxt.base.errors import RateLimitExceeded, NetworkError
 import ccxt
+import ccxt.async_support as ccxt_async
 import traceback
 from directionalscalper.core.strategies.logger import Logger
 
@@ -40,6 +41,12 @@ class BybitExchange(Exchange):
         self.general_rate_limiter = RateLimit(50, 1)
         self.order_rate_limiter = RateLimit(5, 1)
         self.collateral_currency = collateral_currency
+        self.exchange_async = ccxt_async.bybit(
+            {
+                "apiKey": api_key,
+                "secret": secret_key,
+            }
+        )
 
     def log_order_active_times(self):
         try:
@@ -594,18 +601,31 @@ class BybitExchange(Exchange):
         for i in range(max_retries):
             try:
                 data = self.exchange.fetch_positions(symbol)
-                if len(data) == 2:
-                    sides = ["long", "short"]
-                    for side in [0, 1]:
-                        values[sides[side]]["qty"] = float(data[side]["contracts"])
-                        values[sides[side]]["price"] = float(data[side]["entryPrice"] or 0)
-                        values[sides[side]]["realised"] = round(float(data[side]["info"]["unrealisedPnl"] or 0), 4)
-                        values[sides[side]]["cum_realised"] = round(float(data[side]["info"]["cumRealisedPnl"] or 0), 4)
-                        values[sides[side]]["upnl"] = round(float(data[side]["info"]["unrealisedPnl"] or 0), 4)
-                        values[sides[side]]["upnl_pct"] = round(float(data[side]["percentage"] or 0), 4)
-                        values[sides[side]]["liq_price"] = float(data[side]["liquidationPrice"] or 0)
-                        values[sides[side]]["entry_price"] = float(data[side]["entryPrice"] or 0)
-                break  # If the fetch was successful, break out of the loop
+                long_pos = next((x for x in data if x['side'] == 'long'), None)
+
+                if long_pos:
+                    values["long"]["qty"] = float(long_pos["contracts"])
+                    values["long"]["price"] = float(long_pos["entryPrice"] or 0)
+                    values["long"]["realised"] = round(float(long_pos["info"]["unrealisedPnl"] or 0), 4)
+                    values["long"]["cum_realised"] = round(float(long_pos["info"]["cumRealisedPnl"] or 0), 4)
+                    values["long"]["upnl"] = round(float(long_pos["info"]["unrealisedPnl"] or 0), 4)
+                    values["long"]["upnl_pct"] = round(float(long_pos["percentage"] or 0), 4)
+                    values["long"]["liq_price"] = float(long_pos["liquidationPrice"] or 0)
+                    values["long"]["entry_price"] = float(long_pos["entryPrice"] or 0)
+
+                short_pos = next((x for x in data if x['side'] == 'short'), None)
+
+                if short_pos:
+                    values["short"]["qty"] = float(short_pos["contracts"])
+                    values["short"]["price"] = float(short_pos["entryPrice"] or 0)
+                    values["short"]["realised"] = round(float(short_pos["info"]["unrealisedPnl"] or 0), 4)
+                    values["short"]["cum_realised"] = round(float(short_pos["info"]["cumRealisedPnl"] or 0), 4)
+                    values["short"]["upnl"] = round(float(short_pos["info"]["unrealisedPnl"] or 0), 4)
+                    values["short"]["upnl_pct"] = round(float(short_pos["percentage"] or 0), 4)
+                    values["short"]["liq_price"] = float(short_pos["liquidationPrice"] or 0)
+                    values["short"]["entry_price"] = float(short_pos["entryPrice"] or 0)
+
+                return values  # If the fetch was successful, break out of the loop
             except Exception as e:
                 if i < max_retries - 1:  # If not the last attempt
                     logging.info(f"An unknown error occurred in get_positions_bybit(): {e}. Retrying in {retry_delay} seconds...")
@@ -614,7 +634,7 @@ class BybitExchange(Exchange):
                     logging.info(f"Failed to fetch positions after {max_retries} attempts: {e}")
                     raise e  # If it's still failing after max_retries, re-raise the exception.
 
-        return values
+        return {}
 
     def cancel_all_orders_for_symbol_bybit(self, symbol):
         try:
@@ -642,9 +662,31 @@ class BybitExchange(Exchange):
             logging.info(f"Error retrieving leverage tiers for {symbol}: {e}")
             return None
 
+    async def get_current_max_leverage_async(self, symbol):
+        try:
+            # Fetch leverage tiers for the symbol
+            leverage_tiers = await self.exchange_async.fetch_market_leverage_tiers(symbol)
+
+            # Process leverage tiers to find the maximum leverage
+            max_leverage = max([tier['maxLeverage'] for tier in leverage_tiers])
+            logging.info(f"Maximum leverage for symbol {symbol}: {max_leverage}")
+
+            return max_leverage
+
+        except Exception as e:
+            logging.info(f"Error retrieving leverage tiers for {symbol}: {e}")
+            return None
+
     def set_leverage_bybit(self, leverage, symbol):
         try:
             self.exchange.set_leverage(leverage, symbol)
+            logging.info(f"Leverage set to {leverage} for symbol {symbol}")
+        except Exception as e:
+            logging.info(f"Error setting leverage: {e}")
+
+    async def set_leverage_async(self, leverage, symbol):
+        try:
+            await self.exchange_async.set_leverage(leverage, symbol)
             logging.info(f"Leverage set to {leverage} for symbol {symbol}")
         except Exception as e:
             logging.info(f"Error setting leverage: {e}")
@@ -669,12 +711,41 @@ class BybitExchange(Exchange):
             logging.info(f"Failed to set margin mode or margin mode already set to cross for symbol {symbol} with leverage {leverage}: {e}")
             return {"status": "error", "message": str(e)}
 
+    async def set_symbol_to_cross_margin_async(self, symbol, leverage):
+        """
+        Set a specific symbol's margin mode to cross with specified leverage.
+        """
+        try:
+            response = await self.exchange_async.set_margin_mode('cross', symbol=symbol, params={'leverage': leverage})
+
+            retCode = response.get('retCode') if isinstance(response, dict) else None
+
+            if retCode == 110026:  # Margin mode is already set to cross
+                logging.info(f"Symbol {symbol} is already set to cross margin mode. No changes made.")
+                return {"status": "unchanged", "response": response}
+            else:
+                logging.info(f"Margin mode set to cross for symbol {symbol} with leverage {leverage}. Response: {response}")
+                return {"status": "changed", "response": response}
+
+        except Exception as e:
+            logging.info(f"Failed to set margin mode or margin mode already set to cross for symbol {symbol} with leverage {leverage}: {e}")
+            return {"status": "error", "message": str(e)}
+
     def setup_exchange_bybit(self, symbol) -> None:
         values = {"position": False, "leverage": False}
         try:
             # Set the position mode to hedge
             self.exchange.set_position_mode(hedged=True, symbol=symbol)
             values["position"] = True
+        except Exception as e:
+            logging.info(f"An unknown error occurred in with set_position_mode: {e}")
+
+    async def setup_exchange_async(self, symbol) -> None:
+        # values = {"position": False, "leverage": False}
+        try:
+            # Set the position mode to hedge
+            await self.exchange_async.set_position_mode(hedged=True, symbol=symbol)
+            # values["position"] = True
         except Exception as e:
             logging.info(f"An unknown error occurred in with set_position_mode: {e}")
 
@@ -750,6 +821,35 @@ class BybitExchange(Exchange):
                     else:
                         logging.info(f"Error fetching open positions: {e}")
                         return []
+
+    async def get_all_open_positions_async(self, retries=10, delay_factor=10, max_delay=60) -> List[dict]:
+        for attempt in range(retries):
+            try:
+                all_positions = await self.exchange_async.fetch_positions(params={'paginate': True})
+                cursor = all_positions[0]['info']['nextPageCursor']
+                i = 0
+
+                while True and i < 10:
+                    i += 1
+                    positions = await self.exchange_async.fetch_positions(params={'cursor': cursor, 'paginate': True})
+                    if len(positions) == 0:
+                        break
+                    all_positions.extend(positions)
+                    cursor = positions[0]['info']['nextPageCursor']
+
+                open_positions = [position for position in all_positions if float(position.get('contracts', 0)) != 0]
+                return open_positions
+            except Exception as e:
+                is_rate_limit_error = "Too many visits" in str(e) or (hasattr(e, 'response') and e.response.status_code == 403)
+
+                if is_rate_limit_error and attempt < retries - 1:
+                    delay = min(delay_factor * (attempt + 1), max_delay)  # Exponential delay with a cap
+                    logging.info(f"Rate limit on get_all_open_positions_bybit hit, waiting for {delay} seconds before retrying...")
+                    await self.exchange_async.sleep(delay * 1000)
+                    continue
+                else:
+                    logging.info(f"Error fetching open positions: {e}")
+                    return []
 
     def get_all_open_positions_bybit_spot(self, retries=10, delay_factor=10, max_delay=60) -> List[dict]:
         now = datetime.now()
@@ -871,6 +971,28 @@ class BybitExchange(Exchange):
             try:
                 with self.rate_limiter:
                     open_orders = self.exchange.fetch_open_orders(symbol)
+                return open_orders
+            except RateLimitExceeded:
+                logging.info(f"Rate limit exceeded when fetching open orders for {symbol}. Retrying in {retry_wait} seconds...")
+                time.sleep(retry_wait)
+            except NetworkError as e:
+                logging.error(f"Network error fetching open orders for {symbol}: {e}. Retrying in {backoff} seconds...")
+                time.sleep(backoff)
+                backoff *= 2  # Exponential backoff
+            except Exception as e:
+                logging.error(f"Error fetching open orders for {symbol}: {e}")
+                logging.error(traceback.format_exc())
+                break
+        logging.info(f"Failed to fetch open orders for {symbol} after {max_retries} retries.")
+        return []
+
+    async def get_open_orders_async(self, symbol, max_retries=100, retry_wait=1):
+        """Fetches open orders for the given symbol with exponential backoff."""
+        backoff = retry_wait
+        for attempt in range(max_retries):
+            try:
+                with self.rate_limiter:
+                    open_orders = await self.exchange_async.fetch_open_orders(symbol)
                 return open_orders
             except RateLimitExceeded:
                 logging.info(f"Rate limit exceeded when fetching open orders for {symbol}. Retrying in {retry_wait} seconds...")

@@ -341,7 +341,15 @@ class Exchange:
         try:
             # Fetch OHLCV data
             ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
-            df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
+
+            return self.generate_l_signals_from_data(ohlcv_data, symbol, neighbors_count, use_adx_filter, adx_threshold)
+        except Exception as e:
+            logging.info(f"Error in fetching OHLCV data: {e}")
+            return 'neutral'
+
+    def generate_l_signals_from_data(self, ohlcv_data, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
+        try:
+            df = pd.DataFrame(ohlcv_data, columns= ["timestamp", "open", "high", "low", "close", "volume"])
             df.set_index('timestamp', inplace=True)
 
             # Calculate technical indicators
@@ -1379,17 +1387,9 @@ class Exchange:
                 with self.rate_limiter:
                     # Fetch the OHLCV data from the exchange
                     ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)  # Pass the limit parameter
-                    
+
                     # Create a DataFrame from the OHLCV data
-                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                    
-                    # Convert the timestamp to datetime
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                    
-                    # Set the timestamp as the index
-                    df.set_index('timestamp', inplace=True)
-                    
-                    return df
+                    return self.convert_ohlcv_to_df(ohlcv)
 
             except ccxt.RateLimitExceeded as e:
                 retries += 1
@@ -1428,8 +1428,18 @@ class Exchange:
 
         logging.error(f"Failed to fetch OHLCV data after {max_retries} retries.")
         return pd.DataFrame()
+    
+    def convert_ohlcv_to_df(self, ohlcv_data):
+        # Create a DataFrame from the OHLCV data
+        df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
+        # Convert the timestamp to datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
 
+        # Set the timestamp as the index
+        df.set_index('timestamp', inplace=True)
+
+        return df
 
     # def fetch_ohlcv(self, symbol, timeframe='1d', limit=None, max_retries=100, base_delay=10, max_delay=60):
     #     """
