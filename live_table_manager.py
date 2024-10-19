@@ -1,3 +1,4 @@
+import asyncio
 import threading
 import datetime
 import time
@@ -101,10 +102,9 @@ class LiveTableManager:
 
         return table
 
-    def display_table(self):
-        console = Console()
+    async def display_table(self):
         with Live(self.table, auto_refresh=False) as live:
             while True:
-                time.sleep(3)
+                await asyncio.sleep(3)
                 with self.lock:
                     live.update(self.generate_table(), refresh=True)

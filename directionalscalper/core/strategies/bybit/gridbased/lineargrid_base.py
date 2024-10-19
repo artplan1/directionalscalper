@@ -14,7 +14,6 @@ from directionalscalper.core.exchanges.bybit import BybitExchange
 from directionalscalper.core.strategies.logger import Logger
 from live_table_manager import shared_symbols_data
 from rate_limit import RateLimit
-import state
 
 logging = Logger(logger_name="LinearGridBase", filename="LinearGridBase.log", stream=True)
 
