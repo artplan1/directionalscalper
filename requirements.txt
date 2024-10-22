@@ -14,3 +14,4 @@ uuid
 keyboard
 scikit-learn
 asyncio
+aiohttp
