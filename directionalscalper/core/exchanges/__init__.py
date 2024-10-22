@@ -6,4 +6,5 @@ from directionalscalper.core.exchanges.bitget import BitgetExchange
 from directionalscalper.core.exchanges.binance import BinanceExchange
 from directionalscalper.core.exchanges.hyperliquid import HyperLiquidExchange
 from directionalscalper.core.exchanges.bybit import BybitExchange
+from directionalscalper.core.exchanges.bybit_async import BybitExchangeAsync
 from directionalscalper.core.exchanges.exchange import Exchange

@@ -1,6 +1,6 @@
 import argparse
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import os
 from typing import List
 import ccxt.pro as ccxtpro
@@ -12,16 +12,15 @@ import sys
 import time
 import traceback
 
-from api.manager import Manager
 from colorama import Fore, Style
 from config import load_config, Config, VERSION
-from directionalscalper.core.exchanges import BybitExchange
+from api.manager_async import ManagerAsync
+from directionalscalper.core.exchanges import BybitExchangeAsync
 from directionalscalper.core.strategies.logger import Logger
-from directionalscalper.core.strategies.bybit.gridbased.lineargrid_base_single import LinearGridBaseFuturesSingle
-from directionalscalper.core.strategies.bybit.gridbased.lineargrid_base_ws import LinearGridBaseFuturesWs
-from live_table_manager import LiveTableManager
+from directionalscalper.core.strategies.bybit.gridbased.lineargrid_base_async import LinearGridBaseFuturesAsync
+from live_table_manager_with_state import LiveTableManager
 from pathlib import Path
-from rate_limit import RateLimit
+from rate_limit import RateLimitAsync
 
 project_dir = str(Path(__file__).resolve().parent)
 print("Project directory:", project_dir)
@@ -32,8 +31,7 @@ logging = Logger(logger_name="SingleBot", filename="SingleBot.log", stream=True)
 
 colorama.init()
 
-general_rate_limiter = RateLimit(50, 1)
-
+general_rate_limiter_async = RateLimitAsync(50, 1)
 
 class SingleBot:
     stop_ws = False
@@ -110,7 +108,7 @@ class SingleBot:
             f"Target coins mode is {'enabled' if self.target_coins_mode else 'disabled'}"
         )
 
-        self.exchange = BybitExchange(
+        self.exchange = BybitExchangeAsync(
             api_key,
             secret_key,
             collateral_currency=self.exchange_config.collateral_currency or "USDT",
@@ -124,7 +122,7 @@ class SingleBot:
             }
         )
 
-        self.manager = Manager(
+        self.manager = ManagerAsync(
             self.exchange,
             exchange_name=exchange_name,
             data_source_exchange=config.api.data_source_exchange,
@@ -175,6 +173,8 @@ class SingleBot:
                 self.finished_trading_symbols["long"].clear()
                 self.finished_trading_symbols["short"].clear()
 
+                await self._update_balance()
+
                 await self._update_position_data()
 
                 trading_symbols = self.open_position_symbols
@@ -192,8 +192,8 @@ class SingleBot:
                     ):
                         logging.info("Fetching updated rotator symbols")
 
-                        with general_rate_limiter:
-                            await asyncio.to_thread(self._fetch_updated_symbols)
+                        async with general_rate_limiter_async:
+                            await self._fetch_updated_symbols()
 
                         logging.info(
                             f"Refreshed latest rotator symbols: {self.rotator_symbols_cache['symbols']}"
@@ -250,9 +250,15 @@ class SingleBot:
         while not self.stop:
             try:
                 ws_balance = await self.ws_exchange.watch_balance()
-                state.balance = {**ws_balance}
-                state.balance["total"] = ws_balance["info"][0]["totalEquity"]
-                state.balance["available"] = ws_balance["info"][0]["totalAvailableBalance"]
+                casted_balance = {
+                    **ws_balance,
+                    "info": {
+                        'result': {
+                            'list': ws_balance['info']
+                        }
+                    }
+                }
+                state.balance["total"], state.balance["available"] = self.exchange.parse_balance(casted_balance)
                 state.balance["updated_at"] = self.ws_exchange.milliseconds()
             except Exception as e:
                 logging.exception(e)
@@ -424,47 +430,6 @@ class SingleBot:
                         else:
                             print(f"{symbol} positions: ", self.open_position_data[symbol])
                             self.open_position_data[symbol].append(position)
-
-                # empty_positions = [
-                #     position
-                #     for position in position_data
-                #     if position["side"] == "" or not position["side"]
-                # ]
-
-                # # need to remove empty positions from open position data
-                # # WARN: it might be unclear if there are open orders
-                # for empty_position in empty_positions:
-                #     if empty_position["info"]["positionIdx"] == 0:
-                #         continue
-
-                #     direction = (
-                #         "short"
-                #         if empty_position["info"]["positionIdx"] == 2
-                #         else "long"
-                #     )
-
-                #     symbol = self._bybit_symbol_reverse(empty_position["symbol"])
-
-                #     logging.info(f"Empty {direction} position for symbol {symbol}")
-
-                #     if symbol not in self.open_position_data:
-                #         logging.info(f"Symbol {symbol} not in open position data. Skipping.")
-                #         continue
-
-                #     existing_pos_idx = next(
-                #         (
-                #             idx
-                #             for idx, p in enumerate(self.open_position_data[symbol])
-                #             if p["side"].lower() == direction
-                #         ),
-                #         None,
-                #     )
-
-                #     if existing_pos_idx is not None:
-                #         logging.info(f"Removing existing {direction} position for symbol {symbol}")
-                #         self.open_position_data[symbol].pop(existing_pos_idx)
-
-                #         self.trading_symbols.remove(symbol)
 
                 self._process_positions_update()
             except Exception as e:
@@ -654,14 +619,6 @@ class SingleBot:
             logging.info(traceback.format_exc())
 
     def _update_active_symbols(self):
-        # print(f"Updating active symbols: {self.open_position_data}")
-        # print(f"Updating active symbols: {self.open_position_symbols}")
-
-        # for symbol in self.trading_symbols:
-        #     if symbol not in self.open_position_data:
-        #         logging.info(f"[{symbol}] Not in open position data. Removing from trading symbols.")
-        #         self.trading_symbols.remove(symbol)
-
         self.active_long_symbols = {
             symbol
             for symbol, positions in self.open_position_data.items()
@@ -686,23 +643,7 @@ class SingleBot:
             f"Updated unique active symbols ({len(self.unique_active_symbols)}): {self.unique_active_symbols}"
         )
 
-    # def _is_long_position(self, symbol):
-    #     is_long = symbol in self.open_position_data and any(
-    #         pos["side"] and pos["side"].lower() == "long"
-    #         for pos in self.open_position_data[symbol]
-    #     )
-    #     logging.debug(f"Checked if {symbol} is a long position: {is_long}")
-    #     return is_long
-
-    # def _is_short_position(self, symbol):
-    #     is_short = symbol in self.open_position_data and any(
-    #         pos["side"] and pos["side"].lower() == "short"
-    #         for pos in self.open_position_data[symbol]
-    #     )
-    #     logging.debug(f"Checked if {symbol} is a short position: {is_short}")
-    #     return is_short
-
-    def _fetch_updated_symbols(self) -> List[str]:
+    async def _fetch_updated_symbols(self) -> List[str]:
         current_time = time.time()
 
         # Check if the cached data is still valid
@@ -716,7 +657,7 @@ class SingleBot:
         if self.whitelist:
             potential_symbols = [symbol for symbol in self.whitelist]
         else:
-            potential_symbols = self.manager.get_auto_rotate_symbols(
+            potential_symbols = await self.manager.get_auto_rotate_symbols_async(
                 min_qty_threshold=None,
                 blacklist=self.config.bot.blacklist,
                 whitelist=self.whitelist,
@@ -792,16 +733,6 @@ class SingleBot:
             if self.long_mode and has_open_long and not self.graceful_stop_long:
                 running_long_thread = symbol in self.long_threads and not self.long_threads[symbol].done()
 
-                # if symbol in self.long_threads:
-                #     try:
-                #         print(f"Symbol {symbol} in long threads: {self.long_threads[symbol]}")
-                #         print(f"Symbol {symbol} in long threads: {self.long_threads[symbol].result()}")
-                #         print(f"Symbol {symbol} in long threads: {self.long_threads[symbol].done()}")
-                #     except Exception as e:
-                #         print(f"Exception in long threads: {e}")
-                # else:
-                #     logging.info(f"Symbol {symbol} not in long threads")
-
                 if not running_long_thread:
                     thread_started = self._start_thread_for_symbol(symbol, signal, "long")
                     action_taken = thread_started
@@ -876,16 +807,13 @@ class SingleBot:
             if symbol in self.traders[action] and not self.traders[action][symbol].running_trading(action):
                 logging.info(f"Symbol {symbol} in traders for action {action}: false")
 
-                # updating all positions after closing a position
-                # self._update_position_data()
-
                 if signal == 'neutral':
                     logging.info(f"Skipping {action} thread for symbol {symbol} for neutral signal if no open positions")
                     return
 
             logging.info(f"Configuring {action} trader for symbol {symbol}")
 
-            trader = LinearGridBaseFuturesSingle(self.exchange, self.manager, self.config.bot, self.symbols_allowed)
+            trader = LinearGridBaseFuturesAsync(self.exchange, self.manager, self.config.bot, self.symbols_allowed)
             await trader.configure_trader(symbol)
             self.traders[action][symbol] = trader
         else:
@@ -976,6 +904,14 @@ class SingleBot:
 
         for symbol, ohlcvc in zip(symbols, results):
             self.ohlcvcs[symbol] = ohlcvc
+
+    async def _update_balance(self):
+        logging.info("Fetching balance")
+
+        balance = await self.exchange.get_balance_async()
+
+        state.balance['available'], state.balance['total'] = balance
+        state.balance["updated_at"] = self.exchange.exchange_async.milliseconds()
 
     def _cleanup_threads(self):
         for symbol in list(self.long_threads.keys()):

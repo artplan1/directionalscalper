@@ -4982,7 +4982,7 @@ class BybitStrategy(BaseStrategy):
                 spread, min_outer_price_distance, max_outer_price_distance_long, max_outer_price_distance_short
             )
 
-            # should_reissue_long, should_reissue_short = self.should_reissue_orders_revised(symbol, reissue_threshold, long_pos_qty, short_pos_qty, initial_entry_buffer_pct)
+            should_reissue_long, should_reissue_short = self.should_reissue_orders_revised(symbol, reissue_threshold, long_pos_qty, short_pos_qty, initial_entry_buffer_pct)
             open_orders = self.retry_api_call(self.exchange.get_open_orders, symbol)
 
             self.initialize_filled_levels(symbol)
@@ -5219,7 +5219,7 @@ class BybitStrategy(BaseStrategy):
                 tp_order_counts,
                 stop_loss_long,
                 stop_loss_short,
-                stop_loss_enabled,
+                stop_loss_enabled
             )
 
         except Exception as e:
@@ -5618,24 +5618,24 @@ class BybitStrategy(BaseStrategy):
                 logging.info(f"Stop-loss disabled")
 
             # Fetch open symbols for long and short positions
-            # open_symbols_long = self.get_open_symbols_long(open_position_data)
-            # open_symbols_short = self.get_open_symbols_short(open_position_data)
+            open_symbols_long = self.get_open_symbols_long(open_position_data)
+            open_symbols_short = self.get_open_symbols_short(open_position_data)
 
-            # logging.info(f"Open symbols long: {open_symbols_long}")
-            # logging.info(f"Open symbols short: {open_symbols_short}")
+            logging.info(f"Open symbols long: {open_symbols_long}")
+            logging.info(f"Open symbols short: {open_symbols_short}")
 
             # Number of open symbols for long and short positions
-            # length_of_open_symbols_long = len(open_symbols_long)
-            # length_of_open_symbols_short = len(open_symbols_short)
+            length_of_open_symbols_long = len(open_symbols_long)
+            length_of_open_symbols_short = len(open_symbols_short)
 
-            # logging.info(f"Length of open symbols long: {length_of_open_symbols_long}")
-            # logging.info(f"Length of open symbols short: {length_of_open_symbols_short}")
+            logging.info(f"Length of open symbols long: {length_of_open_symbols_long}")
+            logging.info(f"Length of open symbols short: {length_of_open_symbols_short}")
 
             # Combine open symbols from both long and short positions
-            # all_open_symbols = open_symbols_long + open_symbols_short
+            all_open_symbols = open_symbols_long + open_symbols_short
 
             # Count unique open symbols across both long and short positions
-            unique_open_symbols = len(set(open_symbols))
+            unique_open_symbols = len(set(all_open_symbols))
 
             logging.info(f"Unique open symbols: {unique_open_symbols}")
 
@@ -5684,7 +5684,7 @@ class BybitStrategy(BaseStrategy):
                 logging.info(f"[{symbol}] Symbol is in max_qty_reached_symbol_short")
 
             # Additional logic for managing open symbols and checking trading permissions
-            # open_symbols = list(set(all_open_symbols))
+            open_symbols = list(set(all_open_symbols))
             logging.info(f"Open symbols: {open_symbols}")
 
             trading_allowed = self.can_trade_new_symbol(open_symbols, symbols_allowed, symbol)
