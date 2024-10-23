@@ -3,6 +3,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
 from typing import List
+import ccxt
 import ccxt.pro as ccxtpro
 import colorama
 import pandas as pd
@@ -82,24 +83,14 @@ class SingleBot:
                 f"Exchange {exchange_name} with account {account_name} not found in the configuration file."
             )
 
-        api_key = self.exchange_config.api_key
-        secret_key = self.exchange_config.api_secret
         self.symbols_allowed = self.exchange_config.symbols_allowed
         self.long_mode = self.config.bot.linear_grid["long_mode"]
         self.short_mode = self.config.bot.linear_grid["short_mode"]
 
-        self.config_graceful_stop_long = self.graceful_stop_long = self.config.bot.linear_grid.get(
-            "graceful_stop_long", False
-        )
-        self.config_graceful_stop_short = self.graceful_stop_short = self.config.bot.linear_grid.get(
-            "graceful_stop_short", False
-        )
-        self.config_auto_graceful_stop = self.config.bot.linear_grid.get(
-            "auto_graceful_stop", False
-        )
-        self.target_coins_mode = self.config.bot.linear_grid.get(
-            "target_coins_mode", False
-        )
+        self.config_graceful_stop_long = self.graceful_stop_long = self.config.bot.linear_grid.get("graceful_stop_long", False)
+        self.config_graceful_stop_short = self.graceful_stop_short = self.config.bot.linear_grid.get("graceful_stop_short", False)
+        self.config_auto_graceful_stop = self.config.bot.linear_grid.get("auto_graceful_stop", False)
+        self.target_coins_mode = self.config.bot.linear_grid.get("target_coins_mode", False)
         self.whitelist = (
             set(self.config.bot.whitelist) if self.target_coins_mode else []
         )
@@ -109,8 +100,8 @@ class SingleBot:
         )
 
         self.exchange = BybitExchangeAsync(
-            api_key,
-            secret_key,
+            self.exchange_config.api_key,
+            self.exchange_config.api_secret,
             collateral_currency=self.exchange_config.collateral_currency or "USDT",
         )
 
@@ -170,9 +161,6 @@ class SingleBot:
 
                 logging.info("Main loop started at %s", current_time)
 
-                self.finished_trading_symbols["long"].clear()
-                self.finished_trading_symbols["short"].clear()
-
                 await self._update_balance()
 
                 await self._update_position_data()
@@ -224,12 +212,15 @@ class SingleBot:
 
                 logging.info(f"Trading symbols: {self.trading_symbols}")
 
+                self.finished_trading_symbols["long"].clear()
+                self.finished_trading_symbols["short"].clear()
+
                 self._cleanup_threads()
 
                 logging.info("Main loop finished at %s after %s seconds", time.time(), time.time() - current_time)
 
-                # sleep for 3 minutes
-                await asyncio.sleep(180)
+                # sleep for 1 minute
+                await asyncio.sleep(60)
             except Exception as e:
                 logging.exception(e)
 
@@ -271,30 +262,48 @@ class SingleBot:
                     await self.ws_exchange.sleep(5000)
                     continue
 
-                # Determine symbols that need to be subscribed
-                symbols_to_subscribe = self.trading_symbols - self.subscribed_symbols
+                # print(f"Subscribing to trades for subscribed symbols: {self.trading_symbols}")
 
-                if symbols_to_subscribe:
-                    logging.info(f"Subscribing to trades for new symbols: {symbols_to_subscribe}")
+                updated_trades = []
 
-                    # Subscribe only to new symbols
-                    new_trades = await self.ws_exchange.watch_trades_for_symbols(list(symbols_to_subscribe))
-
-                    # Update the subscribed symbols set
-                    self.subscribed_symbols.update(symbols_to_subscribe)
-
-                    # Process the new trades
-                    self._process_new_trades(new_trades)
-
-                # Handle updates for already subscribed symbols
-                if self.subscribed_symbols:
-                    logging.info(f"Subscribing to trades for subscribed symbols: {self.subscribed_symbols}")
-
+                try:
                     # Fetch updates for already subscribed symbols
-                    updated_trades = await self.ws_exchange.watch_trades_for_symbols(list(self.subscribed_symbols))
+                    updated_trades = await self.ws_exchange.watch_trades_for_symbols(sorted(self.trading_symbols))
+                except ccxt.errors.ExchangeError as e:
+                    if "bybit error:already subscribe" in str(e):
+                        logging.warning("Already subscribed error encountered. Retrying...")
+                        await asyncio.sleep(1)  # Wait a bit before retrying
+                        continue  # Retry the loop
+                    else:
+                        raise  # Re-raise other exceptions
 
-                    # Process the updated trades
-                    self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
+                # Process the updated trades
+                self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
+
+                # # Determine symbols that need to be subscribed
+                # symbols_to_subscribe = self.trading_symbols - self.subscribed_symbols
+
+                # if symbols_to_subscribe:
+                #     logging.info(f"Subscribing to trades for new symbols: {symbols_to_subscribe}")
+
+                #     # Subscribe only to new symbols
+                #     new_trades = await self.ws_exchange.watch_trades_for_symbols(list(symbols_to_subscribe))
+
+                #     # Update the subscribed symbols set
+                #     self.subscribed_symbols.update(symbols_to_subscribe)
+
+                #     # Process the new trades
+                #     self._process_new_trades(new_trades)
+
+                # # Handle updates for already subscribed symbols
+                # if self.subscribed_symbols:
+                #     logging.info(f"Subscribing to trades for subscribed symbols: {self.subscribed_symbols}")
+
+                #     # Fetch updates for already subscribed symbols
+                #     updated_trades = await self.ws_exchange.watch_trades_for_symbols(list(self.subscribed_symbols))
+
+                #     # Process the updated trades
+                #     self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
 
                 # # Update the subscribed symbols set
                 # self.subscribed_symbols = self.trading_symbols
