@@ -5641,8 +5641,8 @@ class BybitStrategy(BaseStrategy):
 
             logging.info(f"Unique open symbols: {unique_open_symbols}")
 
-            # should_reissue_long, should_reissue_short = self.should_reissue_orders_revised(
-            #     symbol, reissue_threshold, long_pos_qty, short_pos_qty, initial_entry_buffer_pct)
+            should_reissue_long, should_reissue_short = self.should_reissue_orders_revised(
+                symbol, reissue_threshold, long_pos_qty, short_pos_qty, initial_entry_buffer_pct)
 
             if self.auto_reduce_active_long.get(symbol, False):
                 logging.info(f"Auto-reduce for long position on {symbol} is active")
@@ -5674,8 +5674,8 @@ class BybitStrategy(BaseStrategy):
             logging.info(f"{symbol} Has open long order: {has_open_long_order}")
             logging.info(f"{symbol} Has open short order: {has_open_short_order}")
 
-            # replace_empty_long_grid = (long_pos_qty > 0 and not has_open_long_order)
-            # replace_empty_short_grid = (short_pos_qty > 0 and not has_open_short_order)
+            replace_empty_long_grid = (long_pos_qty > 0 and not has_open_long_order)
+            replace_empty_short_grid = (short_pos_qty > 0 and not has_open_short_order)
 
             current_time = time.time()
 
@@ -5729,15 +5729,15 @@ class BybitStrategy(BaseStrategy):
                     except Exception as e:
                         logging.error(f"Exception in issue_grid_safely for {symbol} - {side}: {e}")
 
-            # replace_long_grid, replace_short_grid = self.should_replace_grid_updated_buffer_min_outerpricedist_v2(
-            #     symbol, 
-            #     long_pos_price, 
-            #     short_pos_price, 
-            #     long_pos_qty, 
-            #     short_pos_qty,
-            #     dynamic_outer_price_distance_long=dynamic_outer_price_distance_long,
-            #     dynamic_outer_price_distance_short=dynamic_outer_price_distance_short
-            # )
+            replace_long_grid, replace_short_grid = self.should_replace_grid_updated_buffer_min_outerpricedist_v2(
+                symbol, 
+                long_pos_price, 
+                short_pos_price, 
+                long_pos_qty, 
+                short_pos_qty,
+                dynamic_outer_price_distance_long=dynamic_outer_price_distance_long,
+                dynamic_outer_price_distance_short=dynamic_outer_price_distance_short
+            )
 
             # Determine if there are open long and short positions based on provided quantities
             has_open_long_position = long_pos_qty > 0

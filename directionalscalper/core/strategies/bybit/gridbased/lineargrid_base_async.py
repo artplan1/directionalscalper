@@ -452,6 +452,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         total_equity=total_equity,
                         best_bid_price=best_bid_price,
                         best_ask_price=best_ask_price,
+                        market_data=market_data
                     )
                 )
 
