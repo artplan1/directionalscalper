@@ -1,5 +1,6 @@
 import json
 import random
+import time
 from typing import List
 
 import pandas as pd
@@ -117,7 +118,7 @@ class BybitExchangeAsync(BybitExchange):
             balance_response = await self.exchange_async.fetch_balance({'type': 'swap'})
 
             # Log the raw response for debugging purposes
-            logging.info(f"Raw balance response from Bybit: {balance_response}")
+            # logging.info(f"Raw balance response from Bybit: {balance_response}")
 
             return self.parse_balance(balance_response)
         except Exception as e:
@@ -130,13 +131,8 @@ class BybitExchangeAsync(BybitExchange):
 
         if self.collateral_currency == 'all':
             if 'info' in balance_response:
-                logging.info("quote is not set - pulling available balance from total available")
-
                 available_balance = balance_response['info']['result']['list'][0]['totalAvailableBalance']
                 available_balance = float(available_balance)
-
-                logging.info("quote is not set - pulling total balance from total equity")
-
                 total_balance = balance_response['info']['result']['list'][0]['totalEquity']
         else:
             # Check for the required keys in the response
@@ -214,3 +210,110 @@ class BybitExchangeAsync(BybitExchange):
 
         logging.error(f"Failed to fetch OHLCV data after {max_retries} retries.")
         return pd.DataFrame()
+
+    # NOTE: these are syncronous, but support full balance with all collateral assets
+    def get_available_balance_bybit(self):
+        if self.exchange.has['fetchBalance']:
+            try:
+                # Fetch the balance with params to specify the account type
+                balance_response = self.exchange.fetch_balance({'type': 'swap'})
+                # Log the raw response for debugging purposes
+                #logging.info(f"Raw available balance response from Bybit: {balance_response}")
+
+                if self.collateral_currency == 'all' and 'info' in balance_response:
+                    available_balance = balance_response['info']['result']['list'][0]['totalAvailableBalance']
+                    return float(available_balance)
+
+                # Check for the required keys in the response
+                if 'free' in balance_response and self.collateral_currency in balance_response['free']:
+                    # Return the available balance for the specified currency
+                    return float(balance_response['free'][self.collateral_currency])
+                else:
+                    logging.warning(f"Available balance for {self.collateral_currency} not found in the response.")
+
+            except Exception as e:
+                logging.info(f"Error fetching available balance from Bybit: {e}")
+        return None
+
+    def get_futures_balance_bybit(self):
+        if self.exchange.has['fetchBalance']:
+            try:
+                # Fetch the balance with params to specify the account type if needed
+                balance_response = self.exchange.fetch_balance({'type': 'swap'})
+                # Log the raw response for debugging purposes
+                #logging.info(f"Raw balance response from Bybit: {balance_response}")
+
+                if self.collateral_currency == 'all' and 'info' in balance_response:
+                    logging.info("quote is not set - pulling total balance from total equity")
+
+                    total_balance = balance_response['info']['result']['list'][0]['totalWalletBalance']
+                    return total_balance
+
+                # Parse the balance
+                if self.collateral_currency in balance_response['total']:
+                    total_balance = balance_response['total'][self.collateral_currency]
+                    return total_balance
+                else:
+                    logging.info(f"Balance for {self.collateral_currency} not found in the response.")
+            except Exception as e:
+                logging.info(f"Error fetching balance from Bybit: {e}")
+
+        return None
+
+    # NOTE: this is syncronous, but works properly if only 1 position is returned
+    def get_positions_bybit(self, symbol, max_retries=100, retry_delay=5) -> dict:
+        values = {
+            "long": {
+                "qty": 0.0,
+                "price": 0.0,
+                "realised": 0,
+                "cum_realised": 0,
+                "upnl": 0,
+                "upnl_pct": 0,
+                "liq_price": 0,
+                "entry_price": 0,
+                'balance': 0
+            },
+            "short": {
+                "qty": 0.0,
+                "price": 0.0,
+                "realised": 0,
+                "cum_realised": 0,
+                "upnl": 0,
+                "upnl_pct": 0,
+                "liq_price": 0,
+                "entry_price": 0,
+                'balance': 0
+            },
+        }
+
+        for i in range(max_retries):
+            try:
+                data = self.exchange.fetch_positions(symbol)
+                positions = {
+                    'long': next((position for position in data if position['side'] == 'long' and float(position.get('contracts', 0)) != 0), None),
+                    'short': next((position for position in data if position['side'] == 'short' and float(position.get('contracts', 0)) != 0), None)
+                }
+
+                for side, position in positions.items():
+                    if not position:
+                        continue
+                    values[side]["qty"] = float(position["contracts"])
+                    values[side]["price"] = float(position["info"]["avgPrice"] or 0)
+                    values[side]["realised"] = round(float(position["info"]["unrealisedPnl"] or 0), 4)
+                    values[side]["cum_realised"] = round(float(position["info"]["cumRealisedPnl"] or 0), 4)
+                    values[side]["upnl"] = round(float(position["info"]["unrealisedPnl"] or 0), 4)
+                    values[side]["upnl_pct"] = round(float(position["percentage"] or 0), 4)
+                    values[side]["liq_price"] = float(position["liquidationPrice"] or 0)
+                    values[side]["entry_price"] = float(position["entryPrice"] or 0)
+                    values[side]["balance"] = float(position["info"]["positionBalance"] or 0)
+                break  # If the fetch was successful, break out of the loop
+            except Exception as e:
+                if i < max_retries - 1:  # If not the last attempt
+                    logging.info(f"An unknown error occurred in get_positions_bybit(): {e}. Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    logging.info(f"Failed to fetch positions after {max_retries} attempts: {e}")
+                    raise e  # If it's still failing after max_retries, re-raise the exception.
+
+        return values

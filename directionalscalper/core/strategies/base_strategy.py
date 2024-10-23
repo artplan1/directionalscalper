@@ -3827,11 +3827,14 @@ class BaseStrategy:
             except Exception as e:
                 logging.info(f"{symbol} Exception caught in auto reduce: {e}")
 
-    def cancel_auto_reduce_orders_bybit(self, symbol, total_equity, max_pos_balance_pct, open_position_data, long_pos_qty, short_pos_qty):
+    def cancel_auto_reduce_orders_bybit(self, symbol, total_equity, max_pos_balance_pct, open_position_data, long_pos_qty, short_pos_qty, long_position_balance, short_position_balance):
         try:
             # Get current position balances
-            long_position_balance = self.get_position_balance(symbol, 'Buy', open_position_data)
-            short_position_balance = self.get_position_balance(symbol, 'Sell', open_position_data)
+            if not long_position_balance:
+                long_position_balance = self.get_position_balance(symbol, 'Buy', open_position_data)
+            if not short_position_balance:
+                short_position_balance = self.get_position_balance(symbol, 'Sell', open_position_data)
+
             long_position_balance_pct = (long_position_balance / total_equity) * 100
             short_position_balance_pct = (short_position_balance / total_equity) * 100
 
