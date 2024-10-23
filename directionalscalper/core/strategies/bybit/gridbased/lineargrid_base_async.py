@@ -2,9 +2,8 @@ import time
 import json
 import os
 import copy
-import threading
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from directionalscalper.core.config_initializer import ConfigInitializer
 from directionalscalper.core.strategies.bybit.bybit_strategy import BybitStrategy
@@ -42,59 +41,20 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
         self.previous_long_pos_qty = 0
         self.previous_short_pos_qty = 0
         self.iteration_cnt = 0
+
         ConfigInitializer.initialize_config_attributes(self, config)
-
-        self.levels = self.config.linear_grid["levels"]
-        self.strength = self.config.linear_grid["strength"]
-        self.long_mode = self.config.linear_grid["long_mode"]
-        self.short_mode = self.config.linear_grid["short_mode"]
-        self.reissue_threshold = self.config.linear_grid["reissue_threshold"]
-        self.enforce_full_grid = self.config.linear_grid["enforce_full_grid"]
-        self.initial_entry_buffer_pct = self.config.linear_grid[
-            "initial_entry_buffer_pct"
-        ]
-        self.min_buffer_percentage = self.config.linear_grid["min_buffer_percentage"]
-        self.max_buffer_percentage = self.config.linear_grid["max_buffer_percentage"]
-        self.wallet_exposure_limit_long = self.config.linear_grid["wallet_exposure_limit_long"]
-        self.wallet_exposure_limit_short = self.config.linear_grid["wallet_exposure_limit_short"]
-        self.max_qty_percent_long = self.config.linear_grid["max_qty_percent_long"]
-        self.max_qty_percent_short = self.config.linear_grid["max_qty_percent_short"]
-        self.min_outer_price_distance = self.config.linear_grid["min_outer_price_distance"]
-        self.max_outer_price_distance_long = self.config.linear_grid["max_outer_price_distance_long"]
-        self.max_outer_price_distance_short = self.config.linear_grid["max_outer_price_distance_short"]
-        self.graceful_stop_long = self.config.linear_grid["graceful_stop_long"]
-        self.graceful_stop_short = self.config.linear_grid["graceful_stop_short"]
-        self.additional_entries_from_signal = self.config.linear_grid["additional_entries_from_signal"]
-        self.stop_loss_long = self.config.linear_grid["stop_loss_long"]
-        self.stop_loss_short = self.config.linear_grid["stop_loss_short"]
-        self.stop_loss_enabled = self.config.linear_grid["stop_loss_enabled"]
-
-        self.grid_behavior = self.config.linear_grid.get("grid_behavior", "infinite")
-        self.drawdown_behavior = self.config.linear_grid.get("drawdown_behavior", "maxqtypercent")
-
-        self.upnl_profit_pct = self.config.upnl_profit_pct
-        self.max_upnl_profit_pct = self.config.max_upnl_profit_pct
-
-        # Stop loss
-        self.stoploss_enabled = self.config.stoploss_enabled
-        self.stoploss_upnl_pct = self.config.stoploss_upnl_pct
-        # Liq based stop loss
-        self.liq_stoploss_enabled = self.config.liq_stoploss_enabled
-        self.liq_price_stop_pct = self.config.liq_price_stop_pct
-
-        self.entry_during_autoreduce = self.config.entry_during_autoreduce
 
     def run(self, symbol, open_symbols={}, mfirsi_signal=None, action=None):
         try:
             standardized_symbol = symbol.upper()
-            logging.info(f"Standardized symbol: {standardized_symbol}")
+            logging.info(f"[{symbol}] Standardized symbol: {standardized_symbol}")
 
             if action == "long":
                 self.run_long_trades(standardized_symbol, mfirsi_signal, open_symbols=open_symbols)
             elif action == "short":
                 self.run_short_trades(standardized_symbol, mfirsi_signal, open_symbols=open_symbols)
         except Exception as e:
-            logging.error(f"Exception in run function: {e}")
+            logging.error(f"[{symbol}] Exception in run function: {e}")
             logging.debug(traceback.format_exc())
 
     def run_long_trades(self, symbol, mfirsi_signal=None, open_symbols={}):
@@ -116,9 +76,9 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
         # Check leverages only at startup
         self.current_leverage = self.max_leverage =  await self.exchange.get_current_max_leverage_async(symbol)
 
-        logging.info(f"Current leverage: {self.current_leverage}")
+        logging.info(f"[{symbol}] Current leverage: {self.current_leverage}")
 
-        logging.info(f"Max leverage for {symbol}: {self.max_leverage}")
+        logging.info(f"[{symbol}] Max leverage: {self.max_leverage}")
 
         await self.exchange.set_leverage_async(self.max_leverage, symbol)
         await self.exchange.set_symbol_to_cross_margin_async(symbol, self.max_leverage)
@@ -131,8 +91,8 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
         self.iteration_cnt += 1
 
         try:
-            logging.info(f"Starting to process symbol: {symbol} iteration: {self.iteration_cnt}")
-            logging.info(f"Initializing default values for symbol: {symbol}")
+            logging.info(f"[{symbol}] Starting iteration: {self.iteration_cnt}")
+            logging.info(f"[{symbol}] Initializing default values")
 
             five_minute_volume = None
             five_minute_distance = None
@@ -143,10 +103,6 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             fetched_total_equity = None
 
-            logging.info(
-                f"Running for symbol (inside run_single_symbol method): {symbol}"
-            )
-
             if action == "long":
                 logging.info(
                     f"[{symbol}] Trading in while loop in obstrategy with long: {self.running_long}"
@@ -154,7 +110,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
                 if not self.running_long:
                     logging.info(
-                        f"Killing thread for {symbol} because not running long"
+                        f"[{symbol}] Killing thread because not running long"
                     )
                     return
 
@@ -166,7 +122,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
                 if not self.running_short:
                     logging.info(
-                        f"Killing thread for {symbol} because not running short"
+                        f"[{symbol}] Killing thread because not running short"
                     )
                     return
 
@@ -266,7 +222,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             # Convert best_ask_price to float to ensure no type mismatches
             best_ask_price = float(best_ask_price)
-            logging.info(f"Best ask price: {best_ask_price}")
+            logging.info(f"[{symbol}] Best ask price: {best_ask_price}")
 
             # Handling best bid price with fallback mechanism
             if "bids" in order_book and len(order_book["bids"]) > 0:
@@ -277,7 +233,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             # Convert best_bid_price to float to ensure no type mismatches
             best_bid_price = float(best_bid_price)
-            logging.info(f"Best bid price: {best_bid_price}")
+            logging.info(f"[{symbol}] Best bid price: {best_bid_price}")
 
             # Fetch moving averages with fallback mechanism
             try:
@@ -330,9 +286,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             logging.info(f"[{symbol}] Symbol precision: {market_data['precision']}")
 
-            position_data = self.retry_api_call(
-                self.exchange.get_positions_bybit, symbol
-            )
+            position_data = self.retry_api_call(self.exchange.get_positions_bybit, symbol)
 
             long_pos_qty = position_data.get("long", {}).get("qty", 0)
             short_pos_qty = position_data.get("short", {}).get("qty", 0)
@@ -371,7 +325,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 return
 
             try:
-                logging.info("Checking position inactivity")
+                logging.info(f"[{symbol}] Checking position inactivity")
                 # Check for position inactivity
                 inactive_pos_time_threshold = 60
                 if self.check_position_inactivity(
@@ -388,7 +342,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                     state.shared_symbols_data.pop(symbol, None)
                     return
             except Exception as e:
-                logging.info(f"Exception caught in check_position_inactivity {e}")
+                logging.info(f"[{symbol}] Exception caught in check_position_inactivity {e}")
 
             # Optionally, break out of the loop if all trading sides are closed
             if not self.running_long and not self.running_short:
@@ -399,7 +353,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 self.active_short_grids.discard(symbol)
                 self.cleanup_before_termination(symbol)
                 logging.info(
-                    "Both long and short operations have terminated. Exiting the loop."
+                    f"[{symbol}] Both long and short operations have terminated. Exiting the loop."
                 )
                 return
 
@@ -423,7 +377,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             if not self.running_long and not self.running_short:
                 logging.info(
-                    "Both long and short operations have ended. Preparing to exit loop."
+                    f"[{symbol}] Both long and short operations have ended. Preparing to exit loop."
                 )
                 state.shared_symbols_data.pop(
                     symbol, None
@@ -516,158 +470,144 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 long_pos_price = position_data.get("long", {}).get("price", None)
                 short_pos_price = position_data.get("short", {}).get("price", None)
 
-                # try:
-                #     self.failsafe_method_leveraged(
-                #         symbol,
-                #         long_pos_qty,
-                #         short_pos_qty,
-                #         long_pos_price,
-                #         short_pos_price,
-                #         long_upnl,
-                #         short_upnl,
-                #         total_equity,
-                #         current_price,
-                #         failsafe_enabled,
-                #         long_failsafe_upnl_pct,
-                #         short_failsafe_upnl_pct,
-                #         failsafe_start_pct,
-                #     )
-                # except Exception as e:
-                #     logging.info(f"Failsafe failed: {e}")
+                if self.failsafe_enabled:
+                    try:
+                        self.failsafe_method_leveraged(
+                            symbol,
+                            long_pos_qty,
+                            short_pos_qty,
+                            long_pos_price,
+                            short_pos_price,
+                            long_upnl,
+                            short_upnl,
+                            total_equity,
+                            current_price,
+                            self.failsafe_enabled,
+                            self.long_failsafe_upnl_pct,
+                            self.short_failsafe_upnl_pct,
+                            self.failsafe_start_pct,
+                        )
+                    except Exception as e:
+                        logging.info(f"[{symbol}] Failsafe failed: {e}")
 
-                # try:
-                #     self.auto_reduce_logic_grid_hardened_cooldown(
-                #         symbol,
-                #         min_qty,
-                #         long_pos_price,
-                #         short_pos_price,
-                #         long_pos_qty,
-                #         short_pos_qty,
-                #         long_upnl,
-                #         short_upnl,
-                #         auto_reduce_cooldown_enabled,
-                #         total_equity,
-                #         current_price,
-                #         long_dynamic_amount,
-                #         short_dynamic_amount,
-                #         auto_reduce_cooldown_start_pct,
-                #         min_buffer_percentage_ar,
-                #         max_buffer_percentage_ar,
-                #         upnl_auto_reduce_threshold_long,
-                #         upnl_auto_reduce_threshold_short,
-                #         self.current_leverage,
-                #     )
-                # except Exception as e:
-                #     logging.info(f"Hardened grid AR exception caught {e}")
+                if self.auto_reduce_enabled:
+                    try:
+                        self.auto_reduce_logic_grid_hardened_cooldown(
+                            symbol,
+                            min_qty,
+                            long_pos_price,
+                            short_pos_price,
+                            long_pos_qty,
+                            short_pos_qty,
+                            long_upnl,
+                            short_upnl,
+                            self.auto_reduce_cooldown_enabled,
+                            total_equity,
+                            current_price,
+                            long_dynamic_amount,
+                            short_dynamic_amount,
+                            self.auto_reduce_cooldown_start_pct,
+                            self.min_buffer_percentage_ar,
+                            self.max_buffer_percentage_ar,
+                            self.upnl_auto_reduce_threshold_long,
+                            self.upnl_auto_reduce_threshold_short,
+                            self.current_leverage,
+                        )
+                    except Exception as e:
+                        logging.info(f"[{symbol}] Hardened grid AR exception caught {e}")
 
-                # try:
-                #     self.auto_reduce_logic_grid_hardened(
-                #         symbol,
-                #         min_qty,
-                #         long_pos_price,
-                #         short_pos_price,
-                #         long_pos_qty,
-                #         short_pos_qty,
-                #         long_upnl,
-                #         short_upnl,
-                #         auto_reduce_enabled,
-                #         total_equity,
-                #         current_price,
-                #         long_dynamic_amount,
-                #         short_dynamic_amount,
-                #         auto_reduce_start_pct,
-                #         min_buffer_percentage_ar,
-                #         max_buffer_percentage_ar,
-                #         upnl_auto_reduce_threshold_long,
-                #         upnl_auto_reduce_threshold_short,
-                #         self.current_leverage,
-                #     )
-                # except Exception as e:
-                #     logging.info(f"Hardened grid AR exception caught {e}")
+                    try:
+                        self.auto_reduce_logic_grid_hardened(
+                            symbol,
+                            min_qty,
+                            long_pos_price,
+                            short_pos_price,
+                            long_pos_qty,
+                            short_pos_qty,
+                            long_upnl,
+                            short_upnl,
+                            self.auto_reduce_enabled,
+                            total_equity,
+                            current_price,
+                            long_dynamic_amount,
+                            short_dynamic_amount,
+                            self.auto_reduce_start_pct,
+                            self.min_buffer_percentage_ar,
+                            self.max_buffer_percentage_ar,
+                            self.upnl_auto_reduce_threshold_long,
+                            self.upnl_auto_reduce_threshold_short,
+                            self.current_leverage,
+                        )
+                    except Exception as e:
+                        logging.info(f"[{symbol}] Hardened grid AR exception caught {e}")
 
-                # self.auto_reduce_percentile_logic(
-                #     symbol,
+                if self.percentile_auto_reduce_enabled:
+                    self.auto_reduce_percentile_logic(
+                        symbol,
+                        long_pos_qty,
+                        long_pos_price,
+                        short_pos_qty,
+                        short_pos_price,
+                        self.percentile_auto_reduce_enabled,
+                        self.auto_reduce_start_pct,
+                        self.auto_reduce_maxloss_pct,
+                        long_dynamic_amount,
+                        short_dynamic_amount,
+                    )
+
+                if self.liq_stoploss_enabled:
+                    self.liq_stop_loss_logic(
+                        long_pos_qty,
+                        long_pos_price,
+                        long_liquidation_price,
+                        short_pos_qty,
+                        short_pos_price,
+                        short_liquidation_price,
+                        liq_stoploss_enabled=self.liq_stoploss_enabled,
+                        symbol=symbol,
+                        liq_price_stop_pct=self.liq_price_stop_pct,
+                    )
+
+                # NOTE: stop losses are controlled in lineargrid_base
+                # self.stop_loss_logic(
                 #     long_pos_qty,
                 #     long_pos_price,
                 #     short_pos_qty,
                 #     short_pos_price,
-                #     percentile_auto_reduce_enabled,
-                #     auto_reduce_start_pct,
-                #     auto_reduce_maxloss_pct,
-                #     long_dynamic_amount,
-                #     short_dynamic_amount,
+                #     stoploss_enabled=self.config.stop_loss_enabled,
+                #     symbol=symbol,
+                #     stoploss_upnl_pct=self.stoploss_upnl_pct,
                 # )
 
-                self.liq_stop_loss_logic(
-                    long_pos_qty,
-                    long_pos_price,
-                    long_liquidation_price,
-                    short_pos_qty,
-                    short_pos_price,
-                    short_liquidation_price,
-                    liq_stoploss_enabled=self.liq_stoploss_enabled,
-                    symbol=symbol,
-                    liq_price_stop_pct=self.liq_price_stop_pct,
-                )
+                if self.auto_reduce_marginbased_enabled:
+                    self.auto_reduce_marginbased_logic(
+                        self.auto_reduce_marginbased_enabled,
+                        long_pos_qty,
+                        short_pos_qty,
+                        long_pos_price,
+                        short_pos_price,
+                        symbol,
+                        total_equity,
+                        self.auto_reduce_wallet_exposure_pct,
+                        open_position_data=None, # it's fetched inside auto_reduce_marginbased_logic
+                        current_market_price=current_price,
+                        long_dynamic_amount=long_dynamic_amount,
+                        short_dynamic_amount=short_dynamic_amount,
+                        auto_reduce_start_pct=self.auto_reduce_start_pct,
+                        auto_reduce_maxloss_pct=self.auto_reduce_maxloss_pct,
+                    )
 
-                self.stop_loss_logic(
-                    long_pos_qty,
-                    long_pos_price,
-                    short_pos_qty,
-                    short_pos_price,
-                    stoploss_enabled=self.stop_loss_enabled,
-                    symbol=symbol,
-                    stoploss_upnl_pct=self.stoploss_upnl_pct,
-                )
-
-                # self.auto_reduce_marginbased_logic(
-                #     auto_reduce_marginbased_enabled,
-                #     long_pos_qty,
-                #     short_pos_qty,
-                #     long_pos_price,
-                #     short_pos_price,
-                #     symbol,
-                #     total_equity,
-                #     auto_reduce_wallet_exposure_pct,
-                #     open_position_data=None,
-                #     current_market_price=current_price,
-                #     long_dynamic_amount=long_dynamic_amount,
-                #     short_dynamic_amount=short_dynamic_amount,
-                #     auto_reduce_start_pct=auto_reduce_start_pct,
-                #     auto_reduce_maxloss_pct=auto_reduce_maxloss_pct,
-                # )
-
-                # TODO: re-visit this
-                # open_position_data = []
-                # if short_pos_price:
-                #     open_position_data.append(
-                #         {
-                #             "info": {
-                #                 "symbol": symbol,
-                #                 "side": "Sell",
-                #                 "positionBalance": short_pos_price,
-                #             }
-                #         }
-                #     )
-                # if long_pos_price:
-                #     open_position_data.append(
-                #         {
-                #             "info": {
-                #                 "symbol": symbol,
-                #                 "side": "Buy",
-                #                 "positionBalance": long_pos_price,
-                #             }
-                #         }
-                #     )
-
-                # self.cancel_auto_reduce_orders_bybit(
-                #     symbol,
-                #     total_equity,
-                #     max_pos_balance_pct,
-                #     open_position_data=open_position_data,
-                #     long_pos_qty=long_pos_qty,
-                #     short_pos_qty=short_pos_qty,
-                # )
+                if self.auto_reduce_enabled or self.auto_reduce_marginbased_enabled or self.percentile_auto_reduce_enabled:
+                    self.cancel_auto_reduce_orders_bybit(
+                        symbol,
+                        total_equity,
+                        self.max_pos_balance_pct,
+                        open_position_data=[], # balances are passed separately, no need for all positions
+                        long_pos_qty=long_pos_qty,
+                        short_pos_qty=short_pos_qty,
+                        long_position_balance=position_data["long"]["balance"],
+                        short_position_balance=position_data["short"]["balance"]
+                    )
 
                 logging.info(
                     f"[{symbol}] Five minute volume: {five_minute_volume}"
@@ -755,31 +695,31 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         short_pos_price,
                         long_pos_qty,
                         short_pos_qty,
-                        levels=self.levels,
-                        strength=self.strength,
-                        min_outer_price_distance=self.min_outer_price_distance,
-                        max_outer_price_distance_long=self.max_outer_price_distance_long,
-                        max_outer_price_distance_short=self.max_outer_price_distance_short,
-                        reissue_threshold=self.reissue_threshold,
-                        wallet_exposure_limit_long=self.wallet_exposure_limit_long,
-                        wallet_exposure_limit_short=self.wallet_exposure_limit_short,
-                        long_mode=self.long_mode,
-                        short_mode=self.short_mode,
-                        initial_entry_buffer_pct=self.initial_entry_buffer_pct,
-                        min_buffer_percentage=self.min_buffer_percentage,
-                        max_buffer_percentage=self.max_buffer_percentage,
-                        symbols_allowed=self.symbols_allowed,
-                        enforce_full_grid=self.enforce_full_grid,
-                        mfirsi_signal=mfirsi_signal,
-                        upnl_profit_pct=self.upnl_profit_pct,
-                        max_upnl_profit_pct=self.max_upnl_profit_pct,
-                        tp_order_counts=tp_order_counts,
-                        entry_during_autoreduce=self.entry_during_autoreduce,
-                        max_qty_percent_long=self.max_qty_percent_long,
-                        max_qty_percent_short=self.max_qty_percent_short,
-                        graceful_stop_long=self.graceful_stop_long,
-                        graceful_stop_short=self.graceful_stop_short,
-                        additional_entries_from_signal=self.additional_entries_from_signal,
+                        self.levels,
+                        self.strength,
+                        self.min_outer_price_distance,
+                        self.max_outer_price_distance_long,
+                        self.max_outer_price_distance_short,
+                        self.reissue_threshold,
+                        self.wallet_exposure_limit_long,
+                        self.wallet_exposure_limit_short,
+                        self.long_mode,
+                        self.short_mode,
+                        self.initial_entry_buffer_pct,
+                        self.min_buffer_percentage,
+                        self.max_buffer_percentage,
+                        self.symbols_allowed,
+                        self.enforce_full_grid,
+                        mfirsi_signal,
+                        self.upnl_profit_pct,
+                        self.max_upnl_profit_pct,
+                        tp_order_counts,
+                        self.entry_during_autoreduce,
+                        self.max_qty_percent_long,
+                        self.max_qty_percent_short,
+                        self.graceful_stop_long,
+                        self.graceful_stop_short,
+                        self.additional_entries_from_signal,
                         open_position_data=[],
                         drawdown_behavior=self.drawdown_behavior,
                         grid_behavior=self.grid_behavior,
@@ -791,11 +731,9 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                     logging.info(f"[{symbol}] Something is up with variables for the grid: {e}")
 
                 end_linear = time.time()
-                logging.info(f"[{symbol}] ended lineargrid_base in {start_linear-end_linear} seconds")
+                logging.info(f"[{symbol}] ended lineargrid_base in {end_linear-start_linear} seconds")
 
-                position_data = self.retry_api_call(
-                    self.exchange.get_positions_bybit, symbol
-                )
+                position_data = self.retry_api_call(self.exchange.get_positions_bybit, symbol)
 
                 long_pos_qty = position_data.get("long", {}).get("qty", 0)
                 short_pos_qty = position_data.get("short", {}).get("qty", 0)
@@ -886,27 +824,12 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                             open_orders=open_orders,
                         )
 
-                # if (
-                #     self.test_orders_enabled
-                #     and time.time() - self.last_helper_order_cancel_time
-                #     >= self.helper_interval
-                # ):
-                #     if symbol in open_symbols:
-                #         self.helper_active = True
-                #         self.helperv2(
-                #             symbol,
-                #             short_dynamic_amount_helper,
-                #             long_dynamic_amount_helper,
-                #         )
-                #     else:
-                #         logging.info(
-                #             f"Skipping test orders for {symbol} as it's not in open symbols list."
-                #         )
-
-                # # Check if the symbol should terminate
-                # if self.should_terminate_full(symbol, current_time, previous_long_pos_qty, long_pos_qty, previous_short_pos_qty, short_pos_qty):
-                #     self.cleanup_before_termination(symbol)
-                #     break  # Exit the while loop, thus ending the thread
+                if self.test_orders_enabled and time.time() - self.last_helper_order_cancel_time >= self.helper_interval:
+                    if symbol in open_symbols:
+                        self.helper_active = True
+                        self.helperv2(symbol, short_dynamic_amount_helper, long_dynamic_amount_helper)
+                    else:
+                        logging.info(f"[{symbol}] Skipping test orders as it's not in open symbols list.")
 
                 # Check to terminate the loop if both long and short are no longer running
                 if not self.running_long and not self.running_short:
@@ -970,41 +893,12 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             iteration_end_time = time.time()  # Record the end time of the iteration
             iteration_duration = iteration_end_time - iteration_start_time
-            logging.info(
-                f"[{symbol}] Iteration took {iteration_duration:.2f} seconds"
-            )
-            # logging.info(f"Total time taken for run_single_symbol: {time.time() - start_time:.2f} seconds")
+            logging.info(f"[{symbol}] Iteration took {iteration_duration:.2f} seconds")
         except Exception as e:
             traceback_info = traceback.format_exc()  # Get the full traceback
             logging.info(
-                f"Exception caught in quickscalp strategy '{symbol}': {e}\nTraceback:\n{traceback_info}"
+                f"[{symbol}] Exception caught in quickscalp strategy: {e}\nTraceback:\n{traceback_info}"
             )
-
-    def cancel_long_grid(self, symbol, short_pos_qty):
-        logging.info(
-            f"[{symbol}] Long position closed. Canceling long grid orders."
-        )
-        self.cancel_grid_orders(symbol, "buy")
-        self.active_long_grids.discard(symbol)
-        if short_pos_qty == 0:
-            logging.info(
-                f"[{symbol}] No open positions. Removing from shared symbols data."
-            )
-            state.shared_symbols_data.pop(symbol, None)
-        return
-
-    def cancel_short_grid(self, symbol, long_pos_qty):
-        logging.info(
-            f"[{symbol}] Short position closed. Canceling short grid orders."
-        )
-        self.cancel_grid_orders(symbol, "sell")
-        self.active_short_grids.discard(symbol)
-        if long_pos_qty == 0:
-            logging.info(
-                f"[{symbol}] No open positions. Removing from shared symbols data."
-            )
-            state.shared_symbols_data.pop(symbol, None)
-        return
 
     def update_shared_data(self, symbol, symbol_data):
         state.shared_symbols_data[symbol] = symbol_data

@@ -294,60 +294,11 @@ class SingleBot:
                     updated_trades = await self.ws_exchange.watch_trades_for_symbols(list(self.subscribed_symbols))
 
                     # Process the updated trades
-                    self._process_new_trades(updated_trades)
+                    self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
 
-                # skipping unsubscribe for now
-                # symbols_to_unwatch = self.subscribed_symbols - self.trading_symbols
+                # # Update the subscribed symbols set
+                # self.subscribed_symbols = self.trading_symbols
 
-                # if symbols_to_unwatch:
-                #     try:
-                #         logging.info(
-                #             f"Unsubscribing from trades for symbols: {symbols_to_unwatch}"
-                #         )
-                #         await self.ws_exchange.un_watch_ohlcv_for_symbols(
-                #             [
-                #                 [self._bybit_symbol(symbol), self.OHLCV_TIMEFRAME]
-                #                 for symbol in symbols_to_unwatch
-                #             ]
-                #         )
-                #         await self.ws_exchange.sleep(1000)
-                #     except Exception as e:
-                #         logging.exception(e)
-
-                # self.subscribed_symbols.clear()
-
-                # symbols_to_watch = list(self.trading_symbols)
-                # symbols_to_watch.sort()
-
-                # logging.info(f"Watching trades for symbols: {symbols_to_watch}")
-
-                # # list of trade dictionaries
-                # new_trades = await self.ws_exchange.watch_trades_for_symbols(symbols_to_watch)
-
-                # self.subscribed_symbols.update(self.trading_symbols)
-
-                # bybit_symbol_by_trades = new_trades[0]['symbol']
-                # symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
-
-                # ohlcvc_by_trades = self.ws_exchange.build_ohlcvc(new_trades, self.OHLCV_TIMEFRAME)
-                # ohlcv_data_sliced = [entry[:6] for entry in ohlcvc_by_trades]
-                # ohlcvc_pd = self.exchange.convert_ohlcv_to_df(ohlcv_data_sliced)
-
-                # if symbol in self.ohlcvcs:
-                #     df = pd.concat(
-                #         [
-                #             self.ohlcvcs[symbol],
-                #             ohlcvc_pd,
-                #         ]
-                #     )
-
-                # self.ohlcvcs[symbol] = df[~df.index.duplicated(keep="last")].tail(self.MAX_CANDLES)
-
-                # signal = self.exchange.generate_l_signals_from_data(self.ohlcvcs[symbol], symbol)
-
-                # # print(f"[{symbol}] received new signal {signal}")
-
-                # self._process_signal(symbol=symbol, signal=signal)
             except Exception as e:
                 logging.warning(e)
 
