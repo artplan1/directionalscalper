@@ -189,9 +189,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 logging.warning(
                     f"[{symbol}] Failed to fetch valid available_equity. Fetching from API."
                 )
-                available_equity = self.retry_api_call(
-                    self.exchange.get_available_balance_bybit
-                )
+                available_equity = self.retry_api_call(self.exchange.get_available_balance_bybit)
 
             logging.info(f"[{symbol}] Total equity: {total_equity}")
             logging.info(f"[{symbol}] Available equity: {available_equity}")
@@ -236,41 +234,41 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
             logging.info(f"[{symbol}] Best bid price: {best_bid_price}")
 
             # Fetch moving averages with fallback mechanism
-            try:
-                moving_averages = self.get_all_moving_averages(symbol)
-            except ValueError as e:
-                logging.info(
-                    f"[{symbol}] Failed to get new moving averages: {e}"
-                )
-                return
+            # try:
+            #     moving_averages = self.get_all_moving_averages(symbol)
+            # except ValueError as e:
+            #     logging.info(
+            #         f"[{symbol}] Failed to get new moving averages: {e}"
+            #     )
+            #     return
 
             # Ensure the moving averages are valid, fallback to last known if not present
-            ma_3_high = moving_averages.get(
-                "ma_3_high",
-                self.last_known_mas.get(symbol, {}).get("ma_3_high", 0.0),
-            )
-            ma_3_low = moving_averages.get(
-                "ma_3_low", self.last_known_mas.get(symbol, {}).get("ma_3_low", 0.0)
-            )
-            ma_6_high = moving_averages.get(
-                "ma_6_high",
-                self.last_known_mas.get(symbol, {}).get("ma_6_high", 0.0),
-            )
-            ma_6_low = moving_averages.get(
-                "ma_6_low", self.last_known_mas.get(symbol, {}).get("ma_6_low", 0.0)
-            )
+            # ma_3_high = moving_averages.get(
+            #     "ma_3_high",
+            #     self.last_known_mas.get(symbol, {}).get("ma_3_high", 0.0),
+            # )
+            # ma_3_low = moving_averages.get(
+            #     "ma_3_low", self.last_known_mas.get(symbol, {}).get("ma_3_low", 0.0)
+            # )
+            # ma_6_high = moving_averages.get(
+            #     "ma_6_high",
+            #     self.last_known_mas.get(symbol, {}).get("ma_6_high", 0.0),
+            # )
+            # ma_6_low = moving_averages.get(
+            #     "ma_6_low", self.last_known_mas.get(symbol, {}).get("ma_6_low", 0.0)
+            # )
 
             # Convert moving averages to float to ensure no type mismatches
-            ma_3_high = float(ma_3_high)
-            ma_3_low = float(ma_3_low)
-            ma_6_high = float(ma_6_high)
-            ma_6_low = float(ma_6_low)
+            # ma_3_high = float(ma_3_high)
+            # ma_3_low = float(ma_3_low)
+            # ma_6_high = float(ma_6_high)
+            # ma_6_low = float(ma_6_low)
 
             # Log warnings if any of the moving averages are missing
-            if None in [ma_3_high, ma_3_low, ma_6_high, ma_6_low]:
-                logging.info(
-                    f"[{symbol}] Missing moving averages. Using fallback values."
-                )
+            # if None in [ma_3_high, ma_3_low, ma_6_high, ma_6_low]:
+            #     logging.info(
+            #         f"[{symbol}] Missing moving averages. Using fallback values."
+            #     )
 
             logging.info(f"Symbols allowed: {self.symbols_allowed}")
 
@@ -437,6 +435,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         best_bid_price=best_bid_price,
                         wallet_exposure_limit_long=self.wallet_exposure_limit_long,
                         wallet_exposure_limit_short=self.wallet_exposure_limit_short,
+                        market_data=market_data
                     )
                 )
 
@@ -622,18 +621,12 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                     try:
                         unrealized_pnl = self.exchange.fetch_unrealized_pnl(symbol)
                         long_upnl = unrealized_pnl.get("long")
-                        self.last_known_upnl[symbol] = self.last_known_upnl.get(
-                            symbol, {}
-                        )
-                        self.last_known_upnl[symbol][
-                            "long"
-                        ] = long_upnl  # Store the last known long uPNL
+                        self.last_known_upnl[symbol] = self.last_known_upnl.get(symbol, {})
+                        self.last_known_upnl[symbol]["long"] = long_upnl  # Store the last known long uPNL
                         logging.info(f"[{symbol}] Long UPNL: {long_upnl}")
                     except Exception as e:
                         # Fallback to last known uPNL if an exception occurs
-                        long_upnl = self.last_known_upnl.get(symbol, {}).get(
-                            "long", 0.0
-                        )
+                        long_upnl = self.last_known_upnl.get(symbol, {}).get("long", 0.0)
                         logging.info(
                             f"[{symbol}] Exception fetching Long UPNL: {e}. Using last known UPNL: {long_upnl}"
                         )
