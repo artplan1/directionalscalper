@@ -143,3 +143,9 @@ account.json
 /toasterenv/
 old_bot.py
 .DS_Store
+
+# Logs
+logs/
+
+# Generated data
+data/

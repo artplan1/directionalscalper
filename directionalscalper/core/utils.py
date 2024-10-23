@@ -9,6 +9,8 @@ from collections import OrderedDict
 from urllib.parse import urlencode
 
 import requests  # type: ignore
+import asyncio
+import aiohttp
 
 log = logging.getLogger(__name__)
 
@@ -130,6 +132,48 @@ def send_public_request(
 
     log.error(f"All retries failed for {url} after {max_retries} attempts")
     return None, None  # Indicating that no data could be retrieved after retries
+
+async def get_request_async(
+    url: str,
+    url_path: str | None = None,
+    payload: dict | None = None,
+    json_in: dict | None = None,
+    json_out: bool = True,
+    max_retries: int = 10000,
+    base_delay: float = 0.5  # base delay for exponential backoff
+):
+    if url_path is not None:
+        url += url_path
+    if payload is None:
+        payload = {}
+    query_string = urlencode(payload, True)
+    if query_string:
+        url += "?" + query_string
+
+    attempt = 0
+
+    async with aiohttp.ClientSession() as session:
+        while attempt < max_retries:
+            try:
+                response = await session.get(url)
+                if not json_out:
+                    return response.headers, await response.text()
+
+                json_response = await response.json()
+                if response.status != 200:
+                    raise HTTPRequestError(url, response.status, json_response.get("msg"))
+
+                return response.headers, json_response
+            except Exception as e:
+                log.warning(f"Connection error on {url}: {e}")
+
+            attempt += 1
+            # Adding increased jitter
+            sleep_time = base_delay * (2 ** min(attempt, 10)) + random.uniform(0, 1)  # Increased jitter up to 1 second
+            await asyncio.sleep(min(sleep_time, 60))  # Still capping the maximum delay to prevent extreme wait times
+
+        log.error(f"All retries failed for {url} after {max_retries} attempts")
+        return None, None  # Indicating that no data could be retrieved after retries
 
 # def send_public_request(
 #     url: str,
