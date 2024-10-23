@@ -1,6 +1,6 @@
 import argparse
 import asyncio
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import os
 from typing import List
 import ccxt.pro as ccxtpro

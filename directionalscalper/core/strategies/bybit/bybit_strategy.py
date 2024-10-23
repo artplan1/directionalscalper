@@ -5095,12 +5095,12 @@ class BybitStrategy(BaseStrategy):
                 amounts_long = self.calculate_order_amounts_aggressive_drawdown(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty
+                    levels, qty_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty, min_qty=min_qty
                 )
                 amounts_short = self.calculate_order_amounts_aggressive_drawdown(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty
+                    levels, qty_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty, min_qty=min_qty
                 )
 
             elif drawdown_behavior == "progressive_drawdown":
@@ -5110,12 +5110,12 @@ class BybitStrategy(BaseStrategy):
                 amounts_long = self.calculate_order_amounts_progressive_distribution(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty
+                    levels, qty_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty, min_qty=min_qty
                 )
                 amounts_short = self.calculate_order_amounts_progressive_distribution(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty
+                    levels, qty_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty, min_qty=min_qty
                 )
 
             else:
@@ -12892,7 +12892,7 @@ class BybitStrategy(BaseStrategy):
                                                     wallet_exposure_limit_long: float, 
                                                     wallet_exposure_limit_short: float, 
                                                     levels: int, qty_precision: float, 
-                                                    side: str, strength: float, long_pos_qty=0, short_pos_qty=0) -> List[float]:
+                                                    side: str, strength: float, long_pos_qty=0, short_pos_qty=0, min_qty=None) -> List[float]:
         logging.info(f"Calculating progressive drawdown order amounts for {symbol} with full position value distribution across {levels} levels.")
         
         # Determine the wallet exposure limit based on the side
@@ -12903,7 +12903,8 @@ class BybitStrategy(BaseStrategy):
         logging.info(f"Maximum position value for {symbol}: {max_position_value}")
         
         # Get the minimum notional and quantity
-        min_qty = self.get_min_qty(symbol)
+        if not min_qty:
+            min_qty = self.get_min_qty(symbol)
         min_notional = self.min_notional(symbol)  # Use self.min_notional(symbol) here
 
         # Track the cumulative position value to ensure progressively larger orders
@@ -12955,7 +12956,7 @@ class BybitStrategy(BaseStrategy):
                                                     wallet_exposure_limit_long: float, 
                                                     wallet_exposure_limit_short: float, 
                                                     levels: int, qty_precision: float, 
-                                                    side: str, strength: float, long_pos_qty=0, short_pos_qty=0) -> List[float]:
+                                                    side: str, strength: float, long_pos_qty=0, short_pos_qty=0, min_qty=None) -> List[float]:
         logging.info(f"Calculating aggressive drawdown order amounts for {symbol} with full position value distribution across {levels} levels.")
         
         # Convert long_pos_qty and short_pos_qty to float to ensure correct arithmetic
@@ -12998,13 +12999,18 @@ class BybitStrategy(BaseStrategy):
         level_notional_factors = [(i + 1) ** strength / total_ratio for i in range(levels)]
         
         current_price = best_ask_price if side == 'buy' else best_bid_price
-        
+
+        if not min_qty:
+            min_qty = self.get_min_qty(symbol)
+
         for i in range(levels):
             level_notional = adjusted_max_position_value * level_notional_factors[i]
             quantity = level_notional / current_price
-            rounded_quantity = max(round(quantity / qty_precision) * qty_precision, self.get_min_qty(symbol))
+            rounded_quantity = max(round(quantity / qty_precision) * qty_precision, min_qty)
             amounts.append(rounded_quantity)
             logging.info(f"Level {i+1} - Aggressive drawdown order quantity: {rounded_quantity}")
+
+        logging.info(f"[{symbol}] - Aggressive drawdown amounts: {amounts}")
 
         return amounts
     
