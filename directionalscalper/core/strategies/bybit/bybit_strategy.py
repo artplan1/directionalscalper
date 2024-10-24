@@ -6097,7 +6097,7 @@ class BybitStrategy(BaseStrategy):
 
             if short_pos_qty > 0:
                 new_short_tp_min, new_short_tp_max = self.calculate_quickscalp_short_take_profit_dynamic_distance(
-                    short_pos_price, symbol, upnl_profit_pct, max_upnl_profit_pct, min_qty=min_qty, price_precision=price_precision
+                    short_pos_price, symbol, upnl_profit_pct, max_upnl_profit_pct, price_precision=price_precision
                 )
                 if new_short_tp_min is not None and new_short_tp_max is not None:
                     self.next_short_tp_update = self.update_quickscalp_tp_dynamic(
