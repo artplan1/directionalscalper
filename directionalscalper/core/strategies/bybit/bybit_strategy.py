@@ -744,7 +744,8 @@ class BybitStrategy(BaseStrategy):
             return None, None
 
         if not price_precision:
-            price_precision = int(self.exchange.get_price_precision(symbol))
+            price_precision = self.exchange.get_price_precision(symbol)
+        price_precision = int(price_precision)
         logging.info(f"Price precision for {symbol}: {price_precision}")
 
         # Calculate the minimum and maximum target profit prices
@@ -760,7 +761,7 @@ class BybitStrategy(BaseStrategy):
                 Decimal('1e-{}'.format(price_precision)), rounding=ROUND_HALF_UP
             )
         except InvalidOperation as e:
-            logging.info(f"Error when quantizing target_profit_prices. {e}")
+            logging.info(f"[{symbol}] Error when quantizing target_profit_prices. {e}")
             return None, None
 
         # Return the minimum and maximum target profit prices as a tuple
