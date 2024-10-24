@@ -207,6 +207,9 @@ class SingleBot:
 
                 for symbol in list(self.trading_symbols):
                     if symbol not in self.ohlcvcs:
+                        await self._fetch_ohlcvcs({symbol})
+
+                    if symbol not in self.ohlcvcs:
                         logging.info(f"Symbol {symbol} not in ohlcvcs. Removing from trading symbols until OHLCVC is loaded.")
                         self.trading_symbols.remove(symbol)
 
