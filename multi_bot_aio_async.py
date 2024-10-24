@@ -882,11 +882,18 @@ class SingleBot:
         open_orders = await self.exchange.get_all_open_orders_async()
 
         for order in open_orders:
-            if order['info']['symbol'] not in self.trading_symbols:
-                symbol = order['info']['symbol']
-                logging.info(f"[{symbol}] found dangling open orders")
-                await self.exchange.cancel_order_by_id_async(order['id'], symbol)
-                logging.info(f"[{symbol}] cancelled dangling open orders")
+            symbol = order['info']['symbol']
+
+            # no active traders running for symbol
+            if symbol not in self.trading_symbols:
+                logging.info(f"[{symbol}] found open order without position")
+                running_traders = symbol in self.traders['long'] or symbol in self.traders['short']
+
+                if running_traders:
+                    logging.info(f"[{symbol}] have running trader for order order")
+                else:
+                    await self.exchange.cancel_order_by_id_async(order['id'], symbol)
+                    logging.info(f"[{symbol}] cancelled dangling open orders")
 
     def _cleanup_threads(self):
         for symbol in list(self.long_threads.keys()):
