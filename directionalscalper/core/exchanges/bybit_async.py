@@ -317,3 +317,24 @@ class BybitExchangeAsync(BybitExchange):
                     raise e  # If it's still failing after max_retries, re-raise the exception.
 
         return values
+
+    async def get_all_open_orders_async(self):
+        """
+        Fetch all open orders for all symbols from the Bybit API.
+
+        :return: A list of open orders for all symbols.
+        """
+        try:
+            all_open_orders = await self.exchange_async.fetch_open_orders(params={'paginate': True})
+            return all_open_orders
+        except Exception as e:
+            print(f"An error occurred while fetching all open orders: {e}")
+            return []
+
+    async def cancel_order_by_id_async(self, order_id, symbol):
+        try:
+            # Call the updated cancel_order method
+            result = await self.exchange_async.cancel_order(id=order_id, symbol=symbol)
+            logging.info(f"Canceled order - ID: {order_id}, Response: {result}")
+        except Exception as e:
+            logging.info(f"Error occurred in cancel_order_by_id_async: {e}")

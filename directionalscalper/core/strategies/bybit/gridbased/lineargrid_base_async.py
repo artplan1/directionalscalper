@@ -740,26 +740,27 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 end_linear = time.time()
                 logging.info(f"[{symbol}] ended lineargrid_base in {end_linear-start_linear} seconds")
 
+                open_orders = self.retry_api_call(self.exchange.get_open_orders, symbol)
+                tp_order_counts = self.exchange.get_open_tp_order_count(open_orders)
+
+                logging.info(f"[{symbol}] Open TP order count: {tp_order_counts}")
+
+                long_tp_counts = tp_order_counts["long_tp_count"]
+                short_tp_counts = tp_order_counts["short_tp_count"]
+
+                logging.info(f"[{symbol}] Long tp counts: {long_tp_counts}")
+                logging.info(f"[{symbol}] Short tp counts: {short_tp_counts}")
+
                 position_data = self.retry_api_call(self.exchange.get_positions_bybit, symbol)
 
                 long_pos_qty = position_data.get("long", {}).get("qty", 0)
                 short_pos_qty = position_data.get("short", {}).get("qty", 0)
-
-                logging.info(f"[{symbol}] Long tp counts: {long_tp_counts}")
-                logging.info(f"[{symbol}] Short tp counts: {short_tp_counts}")
 
                 logging.info(f"[{symbol}] Long pos qty: {long_pos_qty}")
                 logging.info(f"[{symbol}] Short pos qty: {short_pos_qty}")
 
                 current_latest_time = datetime.now()
                 logging.info(f"[{symbol}] Current time: {current_latest_time}")
-
-                logging.info(
-                    f"[{symbol}] Long TP order count: {tp_order_counts['long_tp_count']}"
-                )
-                logging.info(
-                    f"[{symbol}] Short TP order count: {tp_order_counts['short_tp_count']}"
-                )
 
                 # Update TP for long position
                 if long_pos_qty > 0:
