@@ -1,3 +1,4 @@
+import logging
 import threading
 import datetime
 import time
@@ -101,4 +102,7 @@ class LiveTableManager:
             while True:
                 time.sleep(3)
                 with self.lock:
-                    live.update(self.generate_table(), refresh=True)
+                    try:
+                        live.update(self.generate_table(), refresh=True)
+                    except Exception as e:
+                        logging.warning(f"Exc in display table: {e}")

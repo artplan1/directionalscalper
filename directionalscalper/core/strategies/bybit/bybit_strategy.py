@@ -739,11 +739,12 @@ class BybitStrategy(BaseStrategy):
             logging.info(f"No immediate update needed for TP orders for {symbol}. Last update at: {last_tp_update}")
             return last_tp_update
 
-    def calculate_quickscalp_long_take_profit_dynamic_distance(self, long_pos_price, symbol, min_upnl_profit_pct, max_upnl_profit_pct):
+    def calculate_quickscalp_long_take_profit_dynamic_distance(self, long_pos_price, symbol, min_upnl_profit_pct, max_upnl_profit_pct, price_precision=None):
         if long_pos_price is None or long_pos_price <= 0:
             return None, None
 
-        price_precision = int(self.exchange.get_price_precision(symbol))
+        if not price_precision:
+            price_precision = int(self.exchange.get_price_precision(symbol))
         logging.info(f"Price precision for {symbol}: {price_precision}")
 
         # Calculate the minimum and maximum target profit prices
@@ -765,11 +766,12 @@ class BybitStrategy(BaseStrategy):
         # Return the minimum and maximum target profit prices as a tuple
         return float(min_target_profit_price), float(max_target_profit_price)
 
-    def calculate_quickscalp_short_take_profit_dynamic_distance(self, short_pos_price, symbol, min_upnl_profit_pct, max_upnl_profit_pct):
+    def calculate_quickscalp_short_take_profit_dynamic_distance(self, short_pos_price, symbol, min_upnl_profit_pct, max_upnl_profit_pct, price_precision=None):
         if short_pos_price is None or short_pos_price <= 0:
             return None, None
 
-        price_precision = int(self.exchange.get_price_precision(symbol))
+        if not price_precision:
+            price_precision = int(self.exchange.get_price_precision(symbol))
         logging.info(f"Price precision for {symbol}: {price_precision}")
 
         # Calculate the minimum and maximum target profit prices
@@ -791,11 +793,12 @@ class BybitStrategy(BaseStrategy):
         # Return the minimum and maximum target profit prices as a tuple
         return float(min_target_profit_price), float(max_target_profit_price)
     
-    def calculate_quickscalp_long_take_profit(self, long_pos_price, symbol, upnl_profit_pct):
+    def calculate_quickscalp_long_take_profit(self, long_pos_price, symbol, upnl_profit_pct, price_precision=None):
         if long_pos_price is None:
             return None
 
-        price_precision = int(self.exchange.get_price_precision(symbol))
+        if not price_precision:
+            price_precision = int(self.exchange.get_price_precision(symbol))
         logging.info(f"Price precision for {symbol}: {price_precision}")
 
         # Calculate the target profit price
@@ -813,11 +816,12 @@ class BybitStrategy(BaseStrategy):
 
         return float(target_profit_price)
 
-    def calculate_quickscalp_short_take_profit(self, short_pos_price, symbol, upnl_profit_pct):
+    def calculate_quickscalp_short_take_profit(self, short_pos_price, symbol, upnl_profit_pct, price_precision=None):
         if short_pos_price is None:
             return None
 
-        price_precision = int(self.exchange.get_price_precision(symbol))
+        if not price_precision:
+            price_precision = int(self.exchange.get_price_precision(symbol))
         logging.info(f"Price precision for {symbol}: {price_precision}")
 
         # Calculate the target profit price
@@ -835,7 +839,6 @@ class BybitStrategy(BaseStrategy):
 
         return float(target_profit_price)
     
-# price_precision, qty_precision = self.exchange.get_symbol_precision_bybit(symbol)
     def calculate_dynamic_long_take_profit(self, best_bid_price, long_pos_price, symbol, upnl_profit_pct, max_deviation_pct=0.0040):
         if long_pos_price is None:
             logging.info("Long position price is None for symbol: " + symbol)
@@ -1507,16 +1510,13 @@ class BybitStrategy(BaseStrategy):
         logging.info(f"No entry order found for side {side}, excluding helper orders.")
         return False
 
-    def calculate_dynamic_amounts_notional_nowelimit(self, symbol, total_equity, best_ask_price, best_bid_price, max_retries=20, market_data=None):
-        if not market_data:
-            market_data = self.get_market_data_with_retry(symbol, max_retries=max_retries, retry_delay=5)
-
-        # Log the market data for debugging
-        logging.info(f"Market data for {symbol}: {market_data}")
+    def calculate_dynamic_amounts_notional_nowelimit(self, symbol, total_equity, best_ask_price, best_bid_price, max_retries=20, min_qty=None, price_precision=None):
+        if not min_qty or not price_precision:
+            price_precision, min_qty = self.get_precision_and_min_qty(symbol)
 
         try:
-            min_qty = float(market_data.get('min_qty', 1.0))  # Use min_qty directly
-            qty_precision = float(market_data.get('precision', 1))  # Use precision if available
+            min_qty = float(min_qty or 1)  # Use min_qty directly
+            qty_precision = float(price_precision or 1)  # Use precision if available
 
             # Determine the minimum notional value based on the symbol
             if symbol in ["BTCUSDT", "BTC-PERP"]:
@@ -1561,16 +1561,13 @@ class BybitStrategy(BaseStrategy):
             logging.error(f"Error occurred: {e}")
             return 0, 0
 
-    def calculate_dynamic_amounts_notional(self, symbol, total_equity, best_ask_price, best_bid_price, wallet_exposure_limit_long, wallet_exposure_limit_short, max_retries=20, market_data=None):
-        if not market_data:
-            market_data = self.get_market_data_with_retry(symbol, max_retries=max_retries, retry_delay=5)
-
-        # Log the market data for debugging
-        logging.info(f"Market data for {symbol}: {market_data}")
+    def calculate_dynamic_amounts_notional(self, symbol, total_equity, best_ask_price, best_bid_price, wallet_exposure_limit_long, wallet_exposure_limit_short, max_retries=20, min_qty=None, price_precision=None):
+        if not min_qty or not price_precision:
+            price_precision, min_qty = self.get_precision_and_min_qty(symbol)
 
         try:
-            min_qty = float(market_data.get('min_qty', 1.0))  # Use min_qty directly
-            qty_precision = float(market_data.get('precision', 1))  # Use precision if available
+            min_qty = float(min_qty or 1)  # Use min_qty directly
+            qty_precision = float(price_precision or 1)  # Use precision if available
 
             # Determine the minimum notional value based on the symbol
             if symbol in ["BTCUSDT", "BTC-PERP"]:
@@ -4959,7 +4956,7 @@ class BybitStrategy(BaseStrategy):
                         max_upnl_profit_pct: float, tp_order_counts: dict, entry_during_autoreduce: bool,
                         max_qty_percent_long: float, max_qty_percent_short: float, graceful_stop_long: bool, graceful_stop_short: bool,
                         additional_entries_from_signal: bool, open_position_data: list, drawdown_behavior: str, grid_behavior: str,
-                        stop_loss_long: float, stop_loss_short: float, stop_loss_enabled: bool):
+                        stop_loss_long: float, stop_loss_short: float, stop_loss_enabled: bool, min_qty=None, price_precision=None):
         try:
             long_pos_qty = long_pos_qty if long_pos_qty is not None else 0
             short_pos_qty = short_pos_qty if short_pos_qty is not None else 0
@@ -5085,7 +5082,8 @@ class BybitStrategy(BaseStrategy):
                 initial_entry_long, initial_entry_short
             )
 
-            qty_precision, min_qty = self.get_precision_and_min_qty(symbol)
+            if not price_precision or not min_qty:
+                price_precision, min_qty = self.get_precision_and_min_qty(symbol)
 
             # Apply drawdown behavior based on configuration
             if drawdown_behavior == "full_distribution":
@@ -5095,12 +5093,12 @@ class BybitStrategy(BaseStrategy):
                 amounts_long = self.calculate_order_amounts_aggressive_drawdown(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty, min_qty=min_qty
+                    levels, price_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty, min_qty=min_qty
                 )
                 amounts_short = self.calculate_order_amounts_aggressive_drawdown(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty, min_qty=min_qty
+                    levels, price_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty, min_qty=min_qty
                 )
 
             elif drawdown_behavior == "progressive_drawdown":
@@ -5110,12 +5108,12 @@ class BybitStrategy(BaseStrategy):
                 amounts_long = self.calculate_order_amounts_progressive_distribution(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty, min_qty=min_qty
+                    levels, price_precision, side='buy', strength=strength, long_pos_qty=long_pos_qty, min_qty=min_qty
                 )
                 amounts_short = self.calculate_order_amounts_progressive_distribution(
                     symbol, total_equity, best_ask_price, best_bid_price,
                     wallet_exposure_limit_long, wallet_exposure_limit_short,
-                    levels, qty_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty, min_qty=min_qty
+                    levels, price_precision, side='sell', strength=strength, short_pos_qty=short_pos_qty, min_qty=min_qty
                 )
 
             else:
@@ -5157,7 +5155,7 @@ class BybitStrategy(BaseStrategy):
                     total_amount_long,
                     levels,
                     strength,
-                    qty_precision,
+                    price_precision,
                     enforce_full_grid,
                     long_pos_qty,
                     short_pos_qty,
@@ -5169,7 +5167,7 @@ class BybitStrategy(BaseStrategy):
                     total_amount_short,
                     levels,
                     strength,
-                    qty_precision,
+                    price_precision,
                     enforce_full_grid,
                     long_pos_qty,
                     short_pos_qty,
@@ -5221,7 +5219,8 @@ class BybitStrategy(BaseStrategy):
                 tp_order_counts,
                 stop_loss_long,
                 stop_loss_short,
-                stop_loss_enabled
+                stop_loss_enabled,
+                price_precision=price_precision
             )
 
         except Exception as e:
@@ -5429,8 +5428,9 @@ class BybitStrategy(BaseStrategy):
 
 
     def get_precision_and_min_qty(self, symbol):
-        qty_precision = self.exchange.get_symbol_precision_bybit(symbol)[1]
-        min_qty = float(self.get_market_data_with_retry(symbol, max_retries=100, retry_delay=5)["min_qty"])
+        market_data = self.get_market_data_with_retry(symbol, max_retries=100, retry_delay=5)
+        qty_precision = market_data['precision']
+        min_qty = float(market_data["min_qty"])
         logging.info(f"Quantity precision: {qty_precision}, Minimum quantity: {min_qty}")
         return qty_precision, min_qty
 
@@ -5550,7 +5550,7 @@ class BybitStrategy(BaseStrategy):
                         short_mode, long_pos_price, short_pos_price, graceful_stop_long, graceful_stop_short, 
                         min_buffer_percentage, max_buffer_percentage, additional_entries_from_signal, 
                         open_position_data, upnl_profit_pct, max_upnl_profit_pct, tp_order_counts, 
-                        stop_loss_long, stop_loss_short, stop_loss_enabled=True):
+                        stop_loss_long, stop_loss_short, stop_loss_enabled=True, price_precision=None):
 
         try:
             # Determine if there is an open long or short position
@@ -5637,9 +5637,9 @@ class BybitStrategy(BaseStrategy):
             # all_open_symbols = open_symbols_long + open_symbols_short
 
             # Count unique open symbols across both long and short positions
-            # unique_open_symbols = len(set(all_open_symbols))
+            unique_open_symbols = len(set(open_symbols))
 
-            logging.info(f"Unique open symbols: {open_symbols}")
+            logging.info(f"Unique open symbols: {unique_open_symbols}")
 
             should_reissue_long, should_reissue_short = self.should_reissue_orders_revised(
                 symbol, reissue_threshold, long_pos_qty, short_pos_qty, initial_entry_buffer_pct)
@@ -5745,9 +5745,9 @@ class BybitStrategy(BaseStrategy):
 
             logging.info(f"{symbol} has long position: {has_open_long_position}, has short position: {has_open_short_position}")
 
-            logging.info(f"[{symbol}] Number of open symbols: {len(open_symbols)}, Symbols allowed: {symbols_allowed}")
+            logging.info(f"[{symbol}] Number of open symbols: {unique_open_symbols}, Symbols allowed: {symbols_allowed}")
 
-            if open_symbols <= symbols_allowed or symbol in open_symbols:
+            if unique_open_symbols <= symbols_allowed or symbol in open_symbols:
                 fresh_signal = self.generate_l_signals(symbol)
 
                 try:
@@ -6078,7 +6078,7 @@ class BybitStrategy(BaseStrategy):
             # Update TP for long position
             if long_pos_qty > 0:
                 new_long_tp_min, new_long_tp_max = self.calculate_quickscalp_long_take_profit_dynamic_distance(
-                    long_pos_price, symbol, upnl_profit_pct, max_upnl_profit_pct
+                    long_pos_price, symbol, upnl_profit_pct, max_upnl_profit_pct, price_precision=price_precision
                 )
                 if new_long_tp_min is not None and new_long_tp_max is not None:
                     self.next_long_tp_update = self.update_quickscalp_tp_dynamic(
@@ -6097,7 +6097,7 @@ class BybitStrategy(BaseStrategy):
 
             if short_pos_qty > 0:
                 new_short_tp_min, new_short_tp_max = self.calculate_quickscalp_short_take_profit_dynamic_distance(
-                    short_pos_price, symbol, upnl_profit_pct, max_upnl_profit_pct
+                    short_pos_price, symbol, upnl_profit_pct, max_upnl_profit_pct, min_qty=min_qty, price_precision=price_precision
                 )
                 if new_short_tp_min is not None and new_short_tp_max is not None:
                     self.next_short_tp_update = self.update_quickscalp_tp_dynamic(

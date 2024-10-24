@@ -41,6 +41,8 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
         self.previous_long_pos_qty = 0
         self.previous_short_pos_qty = 0
         self.iteration_cnt = 0
+        self.min_qty = None
+        self.price_precision = None
 
         ConfigInitializer.initialize_config_attributes(self, config)
 
@@ -132,9 +134,17 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
             open_orders = self.retry_api_call(self.exchange.get_open_orders, symbol)
 
-            market_data = self.get_market_data_with_retry(symbol, max_retries=100, retry_delay=5)
+            if not self.min_qty or not self.price_precision:
+                market_data = self.get_market_data_with_retry(symbol, max_retries=100, retry_delay=5)
 
-            min_qty = float(market_data["min_qty"])
+                self.min_qty = float(market_data["min_qty"] or 1)
+                self.price_precision = float(market_data['precision'] or 1)
+
+            if not self.min_qty or not self.price_precision:
+                logging.warning(f"[{symbol}] market data is not loaded")
+                return
+
+            logging.info(f"[{symbol}] Symbol precision: {self.price_precision}")
 
             fetched_total_equity = state.balance.get("total")
             last_equity_fetch_time = state.balance.get("updated_at")
@@ -282,7 +292,6 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 f"[{symbol}] Symbol: {symbol}, In open_symbols: {symbol in open_symbols}, Trading allowed: {trading_allowed}"
             )
 
-            logging.info(f"[{symbol}] Symbol precision: {market_data['precision']}")
 
             position_data = self.retry_api_call(self.exchange.get_positions_bybit, symbol)
 
@@ -435,7 +444,8 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         best_bid_price=best_bid_price,
                         wallet_exposure_limit_long=self.wallet_exposure_limit_long,
                         wallet_exposure_limit_short=self.wallet_exposure_limit_short,
-                        market_data=market_data
+                        min_qty=self.min_qty,
+                        price_precision=self.price_precision
                     )
                 )
 
@@ -452,7 +462,8 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         total_equity=total_equity,
                         best_bid_price=best_bid_price,
                         best_ask_price=best_ask_price,
-                        market_data=market_data
+                        min_qty=self.min_qty,
+                        price_precision=self.price_precision
                     )
                 )
 
@@ -494,7 +505,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                     try:
                         self.auto_reduce_logic_grid_hardened_cooldown(
                             symbol,
-                            min_qty,
+                            self.min_qty,
                             long_pos_price,
                             short_pos_price,
                             long_pos_qty,
@@ -519,7 +530,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                     try:
                         self.auto_reduce_logic_grid_hardened(
                             symbol,
-                            min_qty,
+                            self.min_qty,
                             long_pos_price,
                             short_pos_price,
                             long_pos_qty,
@@ -658,7 +669,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
 
                 symbol_data = {
                     "symbol": symbol,
-                    "min_qty": min_qty,
+                    "min_qty": self.min_qty,
                     "current_price": current_price,
                     "balance": total_equity,
                     "available_bal": available_equity,
@@ -719,7 +730,9 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         grid_behavior=self.grid_behavior,
                         stop_loss_long=self.stop_loss_long,
                         stop_loss_short=self.stop_loss_short,
-                        stop_loss_enabled=self.stop_loss_enabled
+                        stop_loss_enabled=self.stop_loss_enabled,
+                        price_precision=self.price_precision,
+                        min_qty=self.min_qty
                     )
                 except Exception as e:
                     logging.info(f"[{symbol}] Something is up with variables for the grid: {e}")
