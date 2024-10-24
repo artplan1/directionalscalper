@@ -797,6 +797,7 @@ class SingleBot:
 
                 if not trader.running_long:
                     logging.info(f"Removing {symbol} from trading symbols")
+                    self.traders[action][symbol] = None
                     self.trading_symbols.discard(symbol)
                     self.open_position_data.pop(symbol, None)
                     self.open_position_symbols.discard(symbol)
@@ -809,6 +810,7 @@ class SingleBot:
 
                 if not trader.running_short:
                     logging.info(f"Removing {symbol} from trading symbols")
+                    self.traders[action][symbol] = None
                     self.trading_symbols.discard(symbol)
                     self.open_position_data.pop(symbol, None)
                     self.open_position_symbols.discard(symbol)
