@@ -125,7 +125,7 @@ class SingleBot:
         signal.signal(signal.SIGINT, self._signal_handler)
 
         loop = asyncio.get_running_loop()
-        loop.set_default_executor(ThreadPoolExecutor(max_workers=max(self.exchange_config.symbols_allowed, 100)))
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=max(self.exchange_config.symbols_allowed * 2, 100)))
 
     async def run(self):
         # Start the live table in a separate task
@@ -224,8 +224,8 @@ class SingleBot:
 
                 logging.info("Main loop finished at %s after %s seconds", time.time(), time.time() - current_time)
 
-                # sleep for 1 minute
-                await asyncio.sleep(60)
+                # sleep for 2 minutes to wait for potential orders to be executed
+                await asyncio.sleep(120)
             except Exception as e:
                 logging.exception(e)
 
@@ -646,79 +646,41 @@ class SingleBot:
         has_open_short = symbol in self.active_short_symbols
         action_taken = False
 
-        # Log if there is an alive thread for the long side
-        if symbol in self.long_threads and not self.long_threads[symbol].done():
-            logging.info(f"A long thread is currently alive for symbol {symbol}.")
-        else:
-            logging.info(f"No active long thread alive for symbol {symbol}.")
-
-        # Log if there is an alive thread for the short side
-        if symbol in self.short_threads and not self.short_threads[symbol].done():
-            logging.info(f"A short thread is currently alive for symbol {symbol}.")
-        else:
-            logging.info(f"No active short thread alive for symbol {symbol}.")
-
         # Handle neutral signals by managing open positions
         if signal == "neutral":
             logging.info(
                 f"Neutral signal received for {symbol}. Managing open positions."
             )
-
-            logging.info(f"Has open long: {has_open_long}")
-
-            if has_open_long:
-                running_long_thread = symbol in self.long_threads and not self.long_threads[symbol].done()
-
-                if not running_long_thread:
-                    thread_started = self._start_thread_for_symbol(symbol, signal, "long")
-                    action_taken = thread_started
-                    logging.info(
-                        f"[DEBUG] {'Started' if thread_started else 'Failed to start'} long thread for symbol {symbol} based on {signal} signal"
-                    )
-                else:
-                    logging.info(f"Long thread already running for symbol {symbol}. Skipping.")
-
-            logging.info(f"Has open short: {has_open_short}")
-
-            if has_open_short:
-                running_short_thread = symbol in self.short_threads and not self.short_threads[symbol].done()
-
-                if not running_short_thread:
-                    thread_started = self._start_thread_for_symbol(symbol, signal, "short")
-                    action_taken = thread_started
-                    logging.info(
-                        f"[DEBUG] {'Started' if thread_started else 'Failed to start'} short thread for symbol {symbol} based on {signal} signal"
-                    )
-                else:
-                    logging.info(f"Short thread already running for symbol {symbol}. Skipping.")
         else:
             logging.info(f"Non-neutral signal received for {symbol}. Starting thread.")
 
-            # Start long thread if long mode is enabled, there is an open long position, and graceful stop is not active
-            if self.long_mode and has_open_long and not self.graceful_stop_long:
-                running_long_thread = symbol in self.long_threads and not self.long_threads[symbol].done()
+        logging.info(f"Has open long: {has_open_long}")
 
-                if not running_long_thread:
-                    thread_started = self._start_thread_for_symbol(symbol, signal, "long")
-                    action_taken = thread_started
-                    logging.info(
-                        f"[DEBUG] {'Started' if thread_started else 'Failed to start'} long thread for open symbol {symbol} based on {signal} signal"
-                    )
-                else:
-                    logging.info(f"Long thread already running for symbol {symbol}. Skipping.")
+        if has_open_long or (self.long_mode):
+            running_long_thread = symbol in self.long_threads and not self.long_threads[symbol].done()
 
-            # Start short thread if short mode is enabled, there is an open short position, and graceful stop is not active
-            if self.short_mode and has_open_short and not self.graceful_stop_short:
-                running_short_thread = symbol in self.short_threads and not self.short_threads[symbol].done()
+            if not running_long_thread:
+                thread_started = self._start_thread_for_symbol(symbol, signal, "long")
+                action_taken = thread_started
+                logging.info(
+                    f"[DEBUG] {'Started' if thread_started else 'Failed to start'} long thread for symbol {symbol} based on {signal} signal"
+                )
+            else:
+                logging.info(f"Long thread already running for symbol {symbol}. Skipping.")
 
-                if not running_short_thread:
-                    thread_started = self._start_thread_for_symbol(symbol, signal, "short")
-                    action_taken = action_taken or thread_started
-                    logging.info(
-                        f"[DEBUG] {'Started' if thread_started else 'Failed to start'} short thread for open symbol {symbol} based on {signal} signal"
-                    )
-                else:
-                    logging.info(f"Short thread already running for symbol {symbol}. Skipping.")
+        logging.info(f"Has open short: {has_open_short}")
+
+        if has_open_short and self.short_mode:
+            running_short_thread = symbol in self.short_threads and not self.short_threads[symbol].done()
+
+            if not running_short_thread:
+                thread_started = self._start_thread_for_symbol(symbol, signal, "short")
+                action_taken = thread_started
+                logging.info(
+                    f"[DEBUG] {'Started' if thread_started else 'Failed to start'} short thread for symbol {symbol} based on {signal} signal"
+                )
+            else:
+                logging.info(f"Short thread already running for symbol {symbol}. Skipping.")
 
         # Log if no action was taken
         if not action_taken:
