@@ -254,7 +254,7 @@ class SingleBot:
                         }
                     }
                 }
-                state.balance["total"], state.balance["available"] = self.exchange.parse_balance(casted_balance)
+                state.balance["available"], state.balance["total"] = self.exchange.parse_balance(casted_balance)
                 state.balance["updated_at"] = self.ws_exchange.milliseconds()
             except Exception as e:
                 logging.exception(e)

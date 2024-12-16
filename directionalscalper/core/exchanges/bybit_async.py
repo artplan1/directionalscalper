@@ -148,7 +148,7 @@ class BybitExchangeAsync(BybitExchange):
             else:
                 logging.info(f"Balance for {self.collateral_currency} not found in the response.")
 
-        return total_balance, available_balance
+        return available_balance, total_balance
 
     async def fetch_ohlcv_async(self, symbol, timeframe='1d', limit=None, max_retries=100, base_delay=10, max_delay=60, params=None):
         """
