@@ -59,7 +59,7 @@ class Exchange:
         self.last_signal = {}
         self.last_signal_time = {}
         self.signal_duration = 60  # Duration in seconds (1 minute)
-        
+
     def initialise(self):
         exchange_class = getattr(ccxt, self.exchange_id)
         exchange_params = {
@@ -113,7 +113,7 @@ class Exchange:
                 'defaultType': self.market_type,
                 'adjustForTimeDifference': True,
             }
-            
+
         # Initializing the exchange object
         self.exchange = exchange_class(exchange_params)
         # Checks if load_markets() have already been ran once.
@@ -342,8 +342,15 @@ class Exchange:
         try:
             # Fetch OHLCV data
             ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
-            df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df.set_index('timestamp', inplace=True)
+
+            return self.generate_l_signals_from_data(ohlcv_data, symbol, neighbors_count, use_adx_filter, adx_threshold)
+        except Exception as e:
+            logging.info(f"Error in fetching OHLCV data: {e}")
+            return 'neutral'
+
+    def generate_l_signals_from_data(self, ohlcv_data, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
+        try:
+            df = pd.DataFrame.copy(ohlcv_data, deep=True)
 
             # Calculate technical indicators
             df['rsi'] = self.n_rsi(df['close'], 14, 1)
@@ -421,9 +428,10 @@ class Exchange:
                 self.last_signal_time[symbol] = current_time
                 return new_signal
         except Exception as e:
+            print(traceback.format_exc())
             logging.info(f"Error in calculating signal: {e}")
             return 'neutral'
-        
+
     # def generate_l_signals(self, symbol, limit=3000, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
     #     try:
     #         # Fetch OHLCV data
@@ -497,7 +505,7 @@ class Exchange:
     #     except Exception as e:
     #         logging.info(f"Error in calculating signal: {e}")
     #         return 'neutral'
-        
+
     # def normalize(self, series):
     #     if not isinstance(series, pd.Series):
     #         series = pd.Series(series)
@@ -643,7 +651,7 @@ class Exchange:
     #     except Exception as e:
     #         logging.info(f"Error in calculating signal: {e}")
     #         return 'neutral'
-        
+
     # def normalize(self, series):
     #     scaler = MinMaxScaler()
     #     series_values = series.values.reshape(-1, 1)  # Convert to 2D array for scaler
@@ -912,7 +920,7 @@ class Exchange:
     #     else:
     #         self.last_signal = new_signal
     #         return new_signal
-        
+
 
     # Works but maybe keeps old signal
     # def generate_l_signals(self, symbol, limit=1000, neighbors_count=8):
@@ -1064,48 +1072,48 @@ class Exchange:
         # Fetch OHLCV data
         ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
         df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        
+
         # Calculate technical indicators
         df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
         df['adx'] = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14).adx()
         df['cci'] = ta.trend.CCIIndicator(df['high'], df['low'], df['close'], window=20).cci()
-        
+
         # Normalize indicators
         def normalize(series):
             return (series - series.min()) / (series.max() - series.min())
-        
+
         df['rsi'] = normalize(df['rsi'])
         df['adx'] = normalize(df['adx'])
         df['cci'] = normalize(df['cci'])
-        
+
         # Prepare feature matrix
         features = df[['rsi', 'adx', 'cci']].values
         distances = []
-        
+
         # Calculate Lorentzian distances
         for i in range(len(features) - 1):
             dist = np.sum(np.log(1 + np.abs(features[-1] - features[i])))
             distances.append(dist)
-        
+
         distances = np.array(distances)
         nearest_indices = distances.argsort()[:neighbors_count]
-        
+
         # Determine prediction based on nearest neighbors
         close_prices = df['close'].values
         predictions = [1 if close_prices[idx + 4] > close_prices[idx] else -1 for idx in nearest_indices]
         prediction = np.sum(predictions)
-        
+
         # Filters (simple EMA and SMA trend filters)
         ema_period = 200
         sma_period = 200
         df['ema'] = df['close'].ewm(span=ema_period, adjust=False).mean()
         df['sma'] = df['close'].rolling(window=sma_period).mean()
-        
+
         is_ema_uptrend = df['close'].iloc[-1] > df['ema'].iloc[-1]
         is_ema_downtrend = df['close'].iloc[-1] < df['ema'].iloc[-1]
         is_sma_uptrend = df['close'].iloc[-1] > df['sma'].iloc[-1]
         is_sma_downtrend = df['close'].iloc[-1] < df['sma'].iloc[-1]
-        
+
         # Generate signals
         if prediction > 0 and is_ema_uptrend and is_sma_uptrend:
             return 'long'
@@ -1127,7 +1135,7 @@ class Exchange:
 
             # Optionally, log the entire current order history for the symbol
             logging.debug(f"Current order history for {symbol}: {self.entry_order_ids[symbol]}")
-            
+
     def set_order_timestamps(self, order_timestamps):
         self.order_timestamps = order_timestamps
 
@@ -1213,16 +1221,16 @@ class Exchange:
     def get_ohlc_data(self, symbol, timeframe='1H', since=None, limit=None):
         """
         Fetches historical OHLC data for the given symbol and timeframe using ccxt's fetch_ohlcv method.
-        
+
         :param str symbol: Symbol of the market to fetch OHLCV data for.
         :param str timeframe: The length of time each candle represents.
         :param int since: Timestamp in ms of the earliest candle to fetch.
         :param int limit: The maximum amount of candles to fetch.
-        
+
         :return: List of OHLCV data.
         """
         ohlc_data = self.fetch_ohlcv(symbol, timeframe, since, limit)
-        
+
         # Parsing the data to a more friendly format (optional)
         parsed_data = []
         for entry in ohlc_data:
@@ -1251,7 +1259,7 @@ class Exchange:
         )
 
         return max_trade_qty
-    
+
     def debug_derivatives_positions(self, symbol):
         try:
             positions = self.exchange.fetch_derivatives_positions([symbol])
@@ -1282,7 +1290,7 @@ class Exchange:
             print(symbol_data)
         except Exception as e:
             logging.info(f"Error occurred in debug_binance_market_data: {e}")
-        
+
     def fetch_trades(self, symbol: str, since: int = None, limit: int = None, params={}):
         """
         Get the list of most recent trades for a particular symbol.
@@ -1306,7 +1314,7 @@ class Exchange:
                 logging.info(f"Error occurred during API call: {e}. Retrying in {delay} seconds...")
                 time.sleep(delay)
         raise Exception(f"Failed to execute the API function after {max_retries} retries.")
-    
+
     def get_price_precision(self, symbol):
         market = self.exchange.market(symbol)
         smallest_increment = market['precision']['price']
@@ -1364,7 +1372,7 @@ class Exchange:
     def fetch_ohlcv(self, symbol, timeframe='1d', limit=None, max_retries=100, base_delay=10, max_delay=60):
         """
         Fetch OHLCV data for the given symbol and timeframe.
-        
+
         :param symbol: Trading symbol.
         :param timeframe: Timeframe string.
         :param limit: Limit the number of returned data points.
@@ -1379,18 +1387,10 @@ class Exchange:
             try:
                 with self.rate_limiter:
                     # Fetch the OHLCV data from the exchange
-                    ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+                    ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)  # Pass the limit parameter
 
                     # Create a DataFrame from the OHLCV data
-                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-
-                    # Convert the timestamp to datetime
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-                    # Set the timestamp as the index
-                    df.set_index('timestamp', inplace=True)
-
-                    return df
+                    return self.convert_ohlcv_to_df(ohlcv)
 
             except ccxt.RateLimitExceeded as e:
                 # Exponential backoff for rate limits
@@ -1431,10 +1431,22 @@ class Exchange:
         logging.error(f"Failed to fetch OHLCV data after {max_retries} retries.")
         return pd.DataFrame()
 
+    def convert_ohlcv_to_df(self, ohlcv_data):
+        # Create a DataFrame from the OHLCV data
+        df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+        # Convert the timestamp to datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+
+        # Set the timestamp as the index
+        df.set_index('timestamp', inplace=True)
+
+        return df
+
     # def fetch_ohlcv(self, symbol, timeframe='1d', limit=None, max_retries=100, base_delay=10, max_delay=60):
     #     """
     #     Fetch OHLCV data for the given symbol and timeframe.
-        
+
     #     :param symbol: Trading symbol.
     #     :param timeframe: Timeframe string.
     #     :param limit: Limit the number of returned data points.
@@ -1450,16 +1462,16 @@ class Exchange:
     #             with self.rate_limiter:
     #                 # Fetch the OHLCV data from the exchange
     #                 ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)  # Pass the limit parameter
-                    
+
     #                 # Create a DataFrame from the OHLCV data
     #                 df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                    
+
     #                 # Convert the timestamp to datetime
     #                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                    
+
     #                 # Set the timestamp as the index
     #                 df.set_index('timestamp', inplace=True)
-                    
+
     #                 return df
 
     #         except ccxt.RateLimitExceeded as e:
@@ -1483,18 +1495,18 @@ class Exchange:
     #             # Log the error message and traceback
     #             logging.info(f"Unexpected error occurred while fetching OHLCV data: {e}")
     #             logging.error(traceback.format_exc())
-                
+
     #             # Handle specific error scenarios
     #             if isinstance(e, TypeError) and 'string indices must be integers' in str(e):
     #                 logging.info(f"TypeError occurred: {e}")
     #                 logging.info(f"Response content: {self.exchange.last_http_response}")
-                    
+
     #                 try:
     #                     response = json.loads(self.exchange.last_http_response)
     #                     logging.info(f"Parsed response into a dictionary: {response}")
     #                 except json.JSONDecodeError as json_error:
     #                     logging.info(f"Failed to parse response: {json_error}")
-                
+
     #             return pd.DataFrame()  # Return empty DataFrame on unexpected errors
 
     #     logging.error(f"Failed to fetch OHLCV data after {max_retries} retries.")
@@ -1503,7 +1515,7 @@ class Exchange:
     # def fetch_ohlcv(self, symbol, timeframe='1d', limit=None):
     #     """
     #     Fetch OHLCV data for the given symbol and timeframe.
-        
+
     #     :param symbol: Trading symbol.
     #     :param timeframe: Timeframe string.
     #     :param limit: Limit the number of returned data points.
@@ -1512,28 +1524,28 @@ class Exchange:
     #     try:
     #         # Fetch the OHLCV data from the exchange
     #         ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)  # Pass the limit parameter
-            
+
     #         # Create a DataFrame from the OHLCV data
     #         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            
+
     #         # Convert the timestamp to datetime
     #         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            
+
     #         # Set the timestamp as the index
     #         df.set_index('timestamp', inplace=True)
-            
+
     #         return df
-        
+
     #     except ccxt.BaseError as e:
     #         # Log the error message
     #         logging.error(f"Failed to fetch OHLCV data: {self.exchange.id} {e}")
-            
+
     #         # Log the traceback for further debugging
     #         logging.error(traceback.format_exc())
-            
+
     #         # Return an empty DataFrame in case of an error
     #         return pd.DataFrame()
-        
+
     #     except Exception as e:
     #         # Check if the error is related to response parsing
     #         if 'response' in locals() and isinstance(response, str):
@@ -1544,11 +1556,11 @@ class Exchange:
     #                 logging.info("Parsed response into a dictionary")
     #             except json.JSONDecodeError as json_error:
     #                 logging.error(f"Failed to parse response: {json_error}")
-            
+
     #         # Log any other unexpected errors
     #         logging.info(f"Unexpected error occurred while fetching OHLCV data: {e}")
     #         logging.info(traceback.format_exc())
-            
+
     #         return pd.DataFrame()
 
     def get_orderbook(self, symbol, max_retries=3, retry_delay=5) -> dict:
@@ -1586,7 +1598,7 @@ class Exchange:
                     raise e  # If it's still failing after max_retries, re-raise the exception.
 
         return values
-    
+
     # Huobi debug
     def get_positions_debug(self):
         try:
@@ -1659,13 +1671,13 @@ class Exchange:
             if "bid" in ticker and "ask" in ticker:
                 bid = ticker["bid"]
                 ask = ticker["ask"]
-                
+
                 # Convert bid and ask to float if they are strings
                 if isinstance(bid, str):
                     bid = float(bid)
                 if isinstance(ask, str):
                     ask = float(ask)
-                
+
                 # Check if bid and ask are numeric
                 if isinstance(bid, (int, float)) and isinstance(ask, (int, float)):
                     return (bid + ask) / 2
@@ -1687,7 +1699,7 @@ class Exchange:
     #     except Exception as e:
     #         logging.error(f"An error occurred in get_current_price() for {symbol}: {e}")
     #         return None
-        
+
     # Binance
     def get_current_price_binance(self, symbol: str) -> float:
         current_price = 0.0
@@ -1761,14 +1773,14 @@ class Exchange:
                     logging.info(f"No data returned for {symbol} on {timeframe}. Retrying...")
                     time.sleep(retry_delay)
                     continue
-                
+
                 df = pd.DataFrame(bars, columns=["Time", "Open", "High", "Low", "Close", "Volume"])
                 df["Time"] = pd.to_datetime(df["Time"], unit="ms")
                 df["MA_3_High"] = df["High"].rolling(3).mean()
                 df["MA_3_Low"] = df["Low"].rolling(3).mean()
                 df["MA_6_High"] = df["High"].rolling(6).mean()
                 df["MA_6_Low"] = df["Low"].rolling(6).mean()
-                
+
                 values["MA_3_H"] = df["MA_3_High"].iat[-1] if len(df["MA_3_High"]) > 0 else None
                 values["MA_3_L"] = df["MA_3_Low"].iat[-1] if len(df["MA_3_Low"]) > 0 else None
                 values["MA_6_H"] = df["MA_6_High"].iat[-1] if len(df["MA_6_High"]) > 0 else None
@@ -1908,14 +1920,14 @@ class Exchange:
             try:
                 logging.info("Performing health check...")  # Log start of health check
                 # You can add more health check logic here
-                
+
                 # Cancel all open orders
                 self.cancel_all_open_orders_bybit()
-                
+
                 logging.info("Health check complete.")  # Log end of health check
             except Exception as e:
                 logging.error(f"An error occurred during the health check: {e}")  # Log any errors
-                
+
             time.sleep(interval_seconds)
 
     # def cancel_all_auto_reduce_orders_bybit(self, symbol: str, auto_reduce_order_ids: List[str]):
@@ -1935,7 +1947,7 @@ class Exchange:
     #     except Exception as e:
     #         logging.warning(f"An unknown error occurred in cancel_all_auto_reduce_orders_bybit(): {e}")
 
-    #v5 
+    #v5
     def cancel_all_reduce_only_orders_bybit(self, symbol: str) -> None:
         try:
             orders = self.exchange.fetch_open_orders(symbol)
@@ -1999,7 +2011,7 @@ class Exchange:
                         logging.info(f"Cancelling order: {order_id}")
         except Exception as e:
             logging.info(f"An unknown error occurred in cancel_entry(): {e}")
-    
+
     def cancel_close(self, symbol: str, side: str) -> None:
         try:
             order = self.exchange.fetch_open_orders(symbol)

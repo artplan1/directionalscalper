@@ -1,11 +1,11 @@
 colorama
-ccxt==4.3.89
+ccxt==4.4.17
 pandas
 pydantic
 python-pidfile
 requests
 rich
-ta
+ta==0.10.3
 streamlit
 plotly
 inquirer
@@ -14,3 +14,4 @@ uuid
 keyboard
 scikit-learn
 asyncio
+aiohttp

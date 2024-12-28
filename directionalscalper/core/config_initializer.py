@@ -50,5 +50,7 @@ class ConfigInitializer:
             strategy_instance.upnl_profit_pct = config.upnl_profit_pct
             strategy_instance.max_upnl_profit_pct = config.max_upnl_profit_pct
             strategy_instance.max_pos_balance_pct = config.max_pos_balance_pct
+            strategy_instance.entry_during_autoreduce = config.entry_during_autoreduce
+
         except AttributeError as e:
             strategy_instance.logger.error(f"Failed to initialize attributes from config: {e}")
