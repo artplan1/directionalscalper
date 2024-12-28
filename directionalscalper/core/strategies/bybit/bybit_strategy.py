@@ -5659,7 +5659,7 @@ class BybitStrategy(BaseStrategy):
         return symbol in grid_set or has_open_order
 
     def handle_grid_trades(self, symbol, grid_levels_long, grid_levels_short, long_grid_active, short_grid_active,
-                        long_pos_qty, short_pos_qty, current_price, dynamic_outer_price_distance_long, dynamic_outer_price_distance_short, min_outer_price_distance,
+                        long_pos_qty, short_pos_qty, current_price, dynamic_outer_price_distance_long, dynamic_outer_price_distance_short, min_outer_price_distance_long, min_outer_price_distance_short,
                         buffer_percentage_long, buffer_percentage_short, adjusted_grid_levels_long, adjusted_grid_levels_short, levels, amounts_long, amounts_short,
                         best_bid_price, best_ask_price, mfirsi_signal, open_orders, initial_entry_buffer_pct,
                         reissue_threshold, entry_during_autoreduce, min_qty, open_symbols, symbols_allowed, long_mode,
