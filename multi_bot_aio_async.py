@@ -224,8 +224,8 @@ class SingleBot:
 
                 logging.info("Main loop finished at %s after %s seconds", time.time(), time.time() - current_time)
 
-                # sleep for 2 minutes to wait for potential orders to be executed
-                await asyncio.sleep(120)
+                # sleep for 3 minutes to wait for potential orders to be executed
+                await asyncio.sleep(180)
             except Exception as e:
                 logging.exception(e)
 
