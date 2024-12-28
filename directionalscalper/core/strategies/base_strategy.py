@@ -1529,13 +1529,14 @@ class BaseStrategy:
 
         if symbols_allowed is None:
             logging.info(f"Symbols alloweed is none, defaulting to 10")
-            symbols_allowed = 10  # Use a default value if symbols_allowed is not specified
+            symbols_allowed = 1  # Use a default value if symbols_allowed is not specified
 
         # If we haven't reached the symbol limit or the current symbol is already being traded, allow the trade
         if self.open_symbols_count < symbols_allowed or current_symbol in unique_open_symbols:
             logging.info(f"New symbol is allowed : Symbols allowed: {symbols_allowed} Open symbol count: {self.open_symbols_count}")
             return True
         else:
+            logging.info(f"New symbol not allowed: Symbols_allowed: {symbols_allowed} open symbol count: {self.open_symbols_count}")
             return False
             
     # def can_trade_new_symbol(self, open_symbols: list, symbols_allowed: int, current_symbol: str) -> bool:
