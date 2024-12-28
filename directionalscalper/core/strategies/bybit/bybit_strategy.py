@@ -5801,6 +5801,9 @@ class BybitStrategy(BaseStrategy):
             logging.info(f"Checking trading for symbol {symbol}. Can trade: {trading_allowed}")
 
             fresh_mfirsi_signal = self.generate_l_signals(symbol)
+            logging.info(f"Fresh MFIRSI signal for {symbol}: {fresh_mfirsi_signal}")
+            mfi_signal_long = fresh_mfirsi_signal == "long"
+            mfi_signal_short = fresh_mfirsi_signal == "short"
 
             logging.info(f"MFIRSI SIGNAL FOR {symbol}: {mfirsi_signal}")
 
