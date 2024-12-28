@@ -5,7 +5,7 @@ pydantic
 python-pidfile
 requests
 rich
-ta
+ta==0.10.3
 streamlit
 plotly
 inquirer

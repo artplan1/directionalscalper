@@ -350,8 +350,7 @@ class Exchange:
 
     def generate_l_signals_from_data(self, ohlcv_data, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         try:
-            df = pd.DataFrame(ohlcv_data, columns= ["timestamp", "open", "high", "low", "close", "volume"])
-            df.set_index('timestamp', inplace=True)
+            df = pd.DataFrame.copy(ohlcv_data, deep=True)
 
             # Calculate technical indicators
             df['rsi'] = self.n_rsi(df['close'], 14, 1)
@@ -429,6 +428,7 @@ class Exchange:
                 self.last_signal_time[symbol] = current_time
                 return new_signal
         except Exception as e:
+            print(traceback.format_exc())
             logging.info(f"Error in calculating signal: {e}")
             return 'neutral'
 
