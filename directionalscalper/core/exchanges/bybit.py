@@ -964,7 +964,7 @@ class BybitExchange(Exchange):
             order_details = {
                 'id': order['id'],
                 'qty': float(order['info']['qty']),
-                'price': float(order['price'])  # Extracting the price
+                'price': float(order['price'] or order['triggerPrice'])  # Extracting the price
             }
             
             if order['info'].get('reduceOnly', False):
