@@ -35,7 +35,7 @@
             "target_coins_mode": false,
             "auto_graceful_stop": false,
             "entry_signal_type": "lorentzian",
-            "additional_entries_from_signal": true,
+            "additional_entries_from_signal": false,
             "graceful_stop_long": false,
             "graceful_stop_short": false,
             "max_qty_percent_long": 30,
@@ -69,7 +69,14 @@
             "short_failsafe_upnl_pct": 10.0,
             "stop_loss_enabled": true,
             "stop_loss_long": 15.0,
-            "stop_loss_short": 15.0
+            "stop_loss_short": 15.0,
+            "auto_hedge_enabled": true,
+            "auto_hedge_ratio": 0.3,
+            "auto_hedge_min_position_size": 0.001,
+            "auto_hedge_price_diff_threshold": 0.002,
+            "hedge_with_grid": true,
+            "disable_grid_on_hedge_side": false,
+            "forcibly_close_hedge": false
         },
         "hotkeys": {
             "hotkeys_enabled": false,

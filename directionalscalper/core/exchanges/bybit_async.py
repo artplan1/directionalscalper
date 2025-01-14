@@ -338,3 +338,22 @@ class BybitExchangeAsync(BybitExchange):
             logging.info(f"Canceled order - ID: {order_id}, Response: {result}")
         except Exception as e:
             logging.info(f"Error occurred in cancel_order_by_id_async: {e}")
+
+    async def create_limit_order_bybit_async(self, symbol: str, side: str, qty: float, price: float, positionIdx=0, params={}):
+        try:
+            if side == "buy" or side == "sell":
+                order = await self.exchange_async.create_order(
+                    symbol=symbol,
+                    type='limit',
+                    side=side,
+                    amount=qty,
+                    price=price,
+                    params={**params, 'positionIdx': positionIdx}  # Pass the 'positionIdx' parameter here
+                )
+                return order
+            else:
+                logging.info(f"side {side} does not exist")
+                return {"error": f"side {side} does not exist"}
+        except Exception as e:
+            logging.info(f"An unknown error occurred in create_limit_order() for {symbol}: {e}")
+            return {"error": str(e)}

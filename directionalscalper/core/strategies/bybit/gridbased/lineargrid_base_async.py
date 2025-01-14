@@ -614,7 +614,14 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                         stop_loss_short=self.stop_loss_short,
                         stop_loss_enabled=self.stop_loss_enabled,
                         price_precision=self.price_precision,
-                        min_qty=self.min_qty
+                        min_qty=self.min_qty,
+                        auto_hedge_enabled=self.auto_hedge_enabled,
+                        auto_hedge_ratio=self.auto_hedge_ratio,
+                        auto_hedge_min_position_size=self.auto_hedge_min_position_size,
+                        auto_hedge_price_diff_threshold=self.auto_hedge_price_diff_threshold,
+                        disable_grid_on_hedge_side=self.disable_grid_on_hedge_side,
+                        hedge_with_grid=self.hedge_with_grid,
+                        forcibly_close_hedge=self.forcibly_close_hedge,
                     )
                 except Exception as e:
                     logging.info(f"[{symbol}] Something is up with variables for the grid: {e}")

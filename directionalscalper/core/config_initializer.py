@@ -42,6 +42,20 @@ class ConfigInitializer:
             strategy_instance.stop_loss_long = config.linear_grid['stop_loss_long']
             strategy_instance.stop_loss_short = config.linear_grid['stop_loss_short']
             strategy_instance.drawdown_behavior = config.linear_grid.get('drawdown_behavior', 'maxqtypercent')
+
+            # >>> New auto-hedge fields <<<
+            strategy_instance.auto_hedge_enabled = config.linear_grid['auto_hedge_enabled']
+            strategy_instance.auto_hedge_ratio = config.linear_grid['auto_hedge_ratio']
+            strategy_instance.auto_hedge_min_position_size = config.linear_grid['auto_hedge_min_position_size']
+            strategy_instance.auto_hedge_price_diff_threshold = config.linear_grid['auto_hedge_price_diff_threshold']
+
+            # >>> Additional new toggles for hedging and grid logic <<<
+            strategy_instance.disable_grid_on_hedge_side = config.linear_grid.get('disable_grid_on_hedge_side', False)
+            strategy_instance.hedge_with_grid = config.linear_grid.get('hedge_with_grid', False)
+
+            strategy_instance.forcibly_close_hedge = config.linear_grid.get('forcibly_close_hedge', False)
+
+            # Non-linear-grid config
             strategy_instance.upnl_threshold_pct = config.upnl_threshold_pct
             strategy_instance.volume_check = config.volume_check
             strategy_instance.max_usd_value = config.max_usd_value
