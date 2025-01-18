@@ -87,6 +87,10 @@ class BybitExchangeAsync(BybitExchange):
         for attempt in range(retries):
             try:
                 all_positions = await self.exchange_async.fetch_positions(params={'paginate': True})
+
+                if not all_positions:
+                    return []
+
                 cursor = all_positions[0]['info']['nextPageCursor']
                 i = 0
 
