@@ -1437,7 +1437,7 @@ class BaseStrategy:
         retry_delay = 2  # delay in seconds
         for attempt in range(max_retries):
             try:
-                df = self.exchange.fetch_ohlcv(symbol, timeframe='5m')
+                df = self.exchange.fetch_ohlcv(symbol, timeframe='1m')
 
                 #print(df.head())
                 df['mfi'] = ta.volume.money_flow_index(df['high'], df['low'], df['close'], df['volume'], window=14)
@@ -1756,7 +1756,7 @@ class BaseStrategy:
         # Deactivate painter for the next cycle
         self.paint_active = False
 
-    def calculate_qfl_levels(self, symbol: str, timeframe='5m', lookback_period=12):
+    def calculate_qfl_levels(self, symbol: str, timeframe='1m', lookback_period=12):
         # Fetch historical candle data
         candles = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=lookback_period)
         df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -1770,7 +1770,7 @@ class BaseStrategy:
 
         return qfl_base, qfl_ceiling
 
-    def calculate_qfl_base(self, symbol: str, timeframe='5m', lookback_period=12):
+    def calculate_qfl_base(self, symbol: str, timeframe='1m', lookback_period=12):
         # Fetch historical candle data
         candles = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=lookback_period)
         df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -2128,7 +2128,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             best_ask_price = self.exchange.get_orderbook(symbol)['asks'][0][0]
@@ -2199,7 +2199,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             logging.info(f"QFL Base for {symbol}: {qfl_base}")
             logging.info(f"QFL Ceiling for {symbol}: {qfl_ceiling}")
             current_price = self.exchange.get_current_price(symbol)
@@ -2245,7 +2245,7 @@ class BaseStrategy:
         with self.symbol_locks[symbol]:
             logging.info(f"Initial entry function with QFL, MFI, and ERI filter initialized for {symbol}")
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             if five_minute_volume > min_vol and five_minute_distance > min_dist:
@@ -2348,7 +2348,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Fetch and process order book
@@ -2396,7 +2396,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Fetch and process order book
@@ -2481,7 +2481,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             order_book = self.exchange.get_orderbook(symbol)
@@ -4350,7 +4350,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             logging.info(f"Current price in autohedge: for {symbol} : {current_price}")
@@ -4438,7 +4438,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             logging.info(f"Current price in autohedge: for {symbol} : {current_price}")
@@ -4525,7 +4525,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Fetch and process order book
@@ -4581,7 +4581,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Fetch and process order book
@@ -4638,7 +4638,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Fetch and process order book
@@ -4696,7 +4696,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Process order book and update best ask/bid prices
@@ -4750,7 +4750,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Process order book and update best ask/bid prices
@@ -4795,7 +4795,7 @@ class BaseStrategy:
         with self.symbol_locks[symbol]:
             logging.info(f"Additional entry function with QFL, MFI, and ERI trend initialized for {symbol}")
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             if five_minute_volume > min_vol and five_minute_distance > min_dist:
@@ -4849,7 +4849,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             best_ask_price = self.exchange.get_orderbook(symbol)['asks'][0][0]
@@ -5071,7 +5071,7 @@ class BaseStrategy:
             largest_bid_wall = max(bid_walls, key=lambda x: x[1], default=None)
             largest_ask_wall = max(ask_walls, key=lambda x: x[1], default=None)
 
-            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='5m', lookback_period=12)
+            qfl_base, qfl_ceiling = self.calculate_qfl_levels(symbol=symbol, timeframe='1m', lookback_period=12)
             current_price = self.exchange.get_current_price(symbol)
 
             # Fetch and process order book

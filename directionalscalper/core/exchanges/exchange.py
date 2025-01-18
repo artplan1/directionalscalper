@@ -165,7 +165,7 @@ class Exchange:
             return 'neutral'
 
     # Fetch OHLCV data for calculating ZigZag
-    def fetch_ohlcv_data(self, symbol, timeframe='5m', limit=5000):
+    def fetch_ohlcv_data(self, symbol, timeframe='1m', limit=5000):
         return self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
 
     # Calculate ZigZag indicator
@@ -341,7 +341,7 @@ class Exchange:
     def generate_l_signals(self, symbol, limit=3000, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         try:
             # Fetch OHLCV data
-            ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
+            ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
 
             return self.generate_l_signals_from_data(ohlcv_data, symbol, neighbors_count, use_adx_filter, adx_threshold)
         except Exception as e:

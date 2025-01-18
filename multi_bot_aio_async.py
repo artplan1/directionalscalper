@@ -62,7 +62,7 @@ class SingleBot:
 
     CACHE_DURATION = 50  # Cache duration in seconds
     MAX_CANDLES = 1000
-    OHLCV_TIMEFRAME = "3m"
+    OHLCV_TIMEFRAME = "1m"
 
     def __init__(self, config: Config, exchange_name: str, account_name: str):
         self.config = config
