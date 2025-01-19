@@ -626,7 +626,7 @@ class SingleBot:
                 min_qty_threshold=None,
                 blacklist=self.config.bot.blacklist,
                 whitelist=self.whitelist,
-                max_usd_value=50,
+                max_usd_value=self.config.bot.max_usd_value,
             )
 
         # Update the cache with new data and timestamp
