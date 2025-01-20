@@ -12,6 +12,7 @@ import state
 import sys
 import time
 import traceback
+from datetime import datetime, timedelta
 
 from colorama import Fore, Style
 from config import load_config, Config, VERSION
@@ -36,7 +37,10 @@ general_rate_limiter_async = RateLimitAsync(50, 1)
 
 class SingleBot:
     stop_ws = False
-    ohlcvcs = {}
+    ohlcvcs = {
+        "1m": {},
+        "3m": {}
+    }
     open_position_data = {}
     active_long_symbols = set()
     active_short_symbols = set()
@@ -62,7 +66,7 @@ class SingleBot:
 
     CACHE_DURATION = 50  # Cache duration in seconds
     MAX_CANDLES = 1000
-    OHLCV_TIMEFRAME = "1m"
+    OHLCV_TIMEFRAMES = ["1m", "3m"]
 
     def __init__(self, config: Config, exchange_name: str, account_name: str):
         self.config = config
@@ -201,16 +205,14 @@ class SingleBot:
                     if new_symbols:
                         logging.info(f"Adding new symbols: {new_symbols}")
 
-                        await self._fetch_ohlcvcs(new_symbols)
-
                 self.trading_symbols = trading_symbols.union(new_symbols)
 
                 for symbol in list(self.trading_symbols):
-                    if symbol not in self.ohlcvcs:
+                    if symbol not in self.ohlcvcs["1m"]:
                         await self._fetch_ohlcvcs({symbol})
 
-                    if symbol not in self.ohlcvcs:
-                        logging.info(f"Symbol {symbol} not in ohlcvcs. Removing from trading symbols until OHLCVC is loaded.")
+                    if symbol not in self.ohlcvcs["1m"]:
+                        logging.info(f"Symbol {symbol} not in 1m ohlcvcs. Removing from trading symbols until OHLCVC is loaded.")
                         self.trading_symbols.remove(symbol)
 
                 logging.info(f"Trading symbols: {self.trading_symbols}")
@@ -267,77 +269,72 @@ class SingleBot:
                     await self.ws_exchange.sleep(5000)
                     continue
 
-                # print(f"Subscribing to trades for subscribed symbols: {self.trading_symbols}")
-
                 updated_trades = []
 
                 try:
-                    # Fetch updates for already subscribed symbols
                     updated_trades = await self.ws_exchange.watch_trades_for_symbols(sorted(self.trading_symbols))
                 except ccxt.errors.ExchangeError as e:
                     if "bybit error:already subscribe" in str(e):
                         logging.warning("Already subscribed error encountered. Retrying...")
-                        await asyncio.sleep(1)  # Wait a bit before retrying
-                        continue  # Retry the loop
+                        await asyncio.sleep(1)
+                        continue
                     else:
-                        raise  # Re-raise other exceptions
+                        raise
 
-                # Process the updated trades
-                self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
-
-                # # Determine symbols that need to be subscribed
-                # symbols_to_subscribe = self.trading_symbols - self.subscribed_symbols
-
-                # if symbols_to_subscribe:
-                #     logging.info(f"Subscribing to trades for new symbols: {symbols_to_subscribe}")
-
-                #     # Subscribe only to new symbols
-                #     new_trades = await self.ws_exchange.watch_trades_for_symbols(list(symbols_to_subscribe))
-
-                #     # Update the subscribed symbols set
-                #     self.subscribed_symbols.update(symbols_to_subscribe)
-
-                #     # Process the new trades
-                #     self._process_new_trades(new_trades)
-
-                # # Handle updates for already subscribed symbols
-                # if self.subscribed_symbols:
-                #     logging.info(f"Subscribing to trades for subscribed symbols: {self.subscribed_symbols}")
-
-                #     # Fetch updates for already subscribed symbols
-                #     updated_trades = await self.ws_exchange.watch_trades_for_symbols(list(self.subscribed_symbols))
-
-                #     # Process the updated trades
-                #     self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
-
-                # # Update the subscribed symbols set
-                # self.subscribed_symbols = self.trading_symbols
+                await self._process_new_trades([trade for trade in updated_trades if self._bybit_symbol_reverse(trade["symbol"]) in self.trading_symbols])
 
             except Exception as e:
                 logging.warning(e)
 
-    def _process_new_trades(self, trades):
+    async def _process_new_trades(self, trades):
         try:
             bybit_symbol_by_trades = trades[0]['symbol']
             symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
 
-            ohlcvc_by_trades = self.ws_exchange.build_ohlcvc(trades, self.OHLCV_TIMEFRAME)
+            # Process 1m data
+            ohlcvc_by_trades = self.ws_exchange.build_ohlcvc(trades, "1m")
             ohlcv_data_sliced = [entry[:6] for entry in ohlcvc_by_trades]
             ohlcvc_pd = self.exchange.convert_ohlcv_to_df(ohlcv_data_sliced)
 
-            if symbol in self.ohlcvcs:
+            if symbol in self.ohlcvcs["1m"]:
                 df = pd.concat(
                     [
-                        self.ohlcvcs[symbol],
+                        self.ohlcvcs["1m"][symbol],
                         ohlcvc_pd,
                     ]
                 )
+                self.ohlcvcs["1m"][symbol] = df[~df.index.duplicated(keep="last")].tail(self.MAX_CANDLES)
 
-            self.ohlcvcs[symbol] = df[~df.index.duplicated(keep="last")].tail(self.MAX_CANDLES)
+            # Process 3m data - we'll update this when we get 3 1m candles
+            if symbol in self.ohlcvcs["3m"]:
+                last_3m_candle_time = self.ohlcvcs["3m"][symbol].index[-1]
+                current_time = pd.Timestamp.now(tz="UTC").tz_localize(None)  # Get current time in UTC and make it naive
 
-            signal = self.exchange.generate_l_signals_from_data(self.ohlcvcs[symbol], symbol)
+                # If more than 3 minutes have passed since last 3m candle
+                if (current_time - last_3m_candle_time).total_seconds() >= 180:
+                    # Fetch new 3m data
+                    logging.info(f"[{symbol}] Fetching new 3m data")
+                    new_3m_data = await self._fetch_ohlcvc(symbol, "3m", limit=5)
+                    if new_3m_data is not None:
+                        df = pd.concat(
+                                [
+                                    self.ohlcvcs["3m"][symbol],
+                                    new_3m_data,
+                                ]
+                            )
+                        self.ohlcvcs["3m"][symbol] = df[~df.index.duplicated(keep="last")].tail(self.MAX_CANDLES)
 
-            self._process_signal(symbol=symbol, signal=signal)
+            # Generate signal using both timeframes
+            if symbol in self.ohlcvcs["1m"] and symbol in self.ohlcvcs["3m"]:
+                signal = self.exchange.generate_l_signals_from_data(
+                    self.ohlcvcs["1m"][symbol],
+                    self.ohlcvcs["3m"][symbol],
+                    symbol
+                )
+                self._process_signal(symbol=symbol, signal=signal)
+            else:
+                logging.info(f"Missing data for symbol {symbol} in one of the timeframes")
+
         except Exception as e:
             logging.warning(f"Error processing trades: {e}")
 
@@ -760,10 +757,10 @@ class SingleBot:
                 if not trader.running_long:
                     logging.info(f"Removing {symbol} from trading symbols")
                     del self.traders[action][symbol]
-                    self.trading_symbols.discard(symbol)
+                    # self.trading_symbols.discard(symbol)
                     self.open_position_data.pop(symbol, None)
                     self.open_position_symbols.discard(symbol)
-                    self.finished_trading_symbols["long"].add(symbol)
+                    # self.finished_trading_symbols["long"].add(symbol)
             elif action == "short":
                 await asyncio.to_thread(trader.run, symbol, mfirsi_signal=signal, action="short", open_symbols=self.open_position_symbols)
 
@@ -773,10 +770,10 @@ class SingleBot:
                 if not trader.running_short:
                     logging.info(f"Removing {symbol} from trading symbols")
                     del self.traders[action][symbol]
-                    self.trading_symbols.discard(symbol)
+                    # self.trading_symbols.discard(symbol)
                     self.open_position_data.pop(symbol, None)
                     self.open_position_symbols.discard(symbol)
-                    self.finished_trading_symbols["short"].add(symbol)
+                    # self.finished_trading_symbols["short"].add(symbol)
         except Exception as e:
             logging.error(f"Error running strategy for {symbol}: {e}")
 
@@ -806,16 +803,16 @@ class SingleBot:
 
         self._process_positions_update()
 
-    async def _fetch_ohlcvc(self, symbol):
+    async def _fetch_ohlcvc(self, symbol, timeframe, limit=MAX_CANDLES):
         try:
             ohlcvc = await self.exchange.exchange_async.fetch_ohlcv(
                 symbol=self._bybit_symbol(symbol),
-                timeframe=self.OHLCV_TIMEFRAME,
-                limit=self.MAX_CANDLES,
+                timeframe=timeframe,
+                limit=limit,
                 params={"paginate": True}
             )
 
-            logging.info(f"Fetched OHLCVCS for symbol {symbol}")
+            logging.info(f"Fetched OHLCVCS for symbol {symbol} on {timeframe}")
 
             return self.exchange.convert_ohlcv_to_df(ohlcvc)
         except Exception as e:
@@ -825,14 +822,17 @@ class SingleBot:
     async def _fetch_ohlcvcs(self, symbols):
         logging.info(f"Fetching new OHLCVCS for symbols: {symbols}")
 
-        tasks = [
-            self._fetch_ohlcvc(symbol)
-            for symbol in symbols
-        ]
-        results = await asyncio.gather(*tasks)
+        for timeframe in self.OHLCV_TIMEFRAMES:
+            tasks = [
+                self._fetch_ohlcvc(symbol, timeframe)
+                for symbol in symbols
+            ]
+            results = await asyncio.gather(*tasks)
 
-        for symbol, ohlcvc in zip(symbols, results):
-            self.ohlcvcs[symbol] = ohlcvc
+            for symbol, ohlcvc in zip(symbols, results):
+                if timeframe not in self.ohlcvcs:
+                    self.ohlcvcs[timeframe] = {}
+                self.ohlcvcs[timeframe][symbol] = ohlcvc
 
     async def _update_balance(self):
         logging.info("Fetching balance")
@@ -848,12 +848,18 @@ class SingleBot:
         for order in open_orders:
             symbol = order['info']['symbol']
 
-            # no active traders running for symbol
-            if symbol not in self.trading_symbols:
-                logging.info(f"[{symbol}] found open order without position")
-                running_traders = symbol in self.traders['long'] or symbol in self.traders['short']
+            if order['info']['stopOrderType'] == 'TakeProfit':
+                continue
 
-                if running_traders:
+            open_long_time_ago = order['timestamp'] < (datetime.now() - timedelta(minutes=5)).timestamp() * 1000
+
+            # no active traders running for symbol OR open long time ago
+            if symbol not in self.trading_symbols or open_long_time_ago:
+                logging.info(f"[{symbol}] found open order without position")
+                running_long = symbol in self.traders['long'] and self.traders['long'][symbol].running_trading('long')
+                running_short = symbol in self.traders['short'] and self.traders['short'][symbol].running_trading('short')
+
+                if not open_long_time_ago and (running_long or running_short):
                     logging.info(f"[{symbol}] have running trader for order order")
                 else:
                     await self.exchange.cancel_order_by_id_async(order['id'], symbol)

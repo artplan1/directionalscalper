@@ -23,6 +23,7 @@ from ..strategies.logger import Logger
 from requests.exceptions import HTTPError
 from datetime import datetime, timedelta
 from ccxt.base.errors import NetworkError
+from ta.trend import MACD
 
 logging = Logger(logger_name="Exchange", filename="Exchange.log", stream=True)
 
@@ -264,39 +265,143 @@ class Exchange:
         return support_resistance_levels
 
     def normalize(self, series):
-        if not isinstance(series, pd.Series):
-            series = pd.Series(series)
-        scaler = MinMaxScaler()
-        series_values = series.values.reshape(-1, 1)
-        normalized_values = scaler.fit_transform(series_values).flatten()
-        return pd.Series(normalized_values, index=series.index)
+        try:
+            if not isinstance(series, pd.Series):
+                series = pd.Series(series)
+
+            # Check for invalid values
+            if series.isna().any():
+                logging.error(f"Input series contains NaN values")
+                return series
+
+            if series.min() == series.max():
+                logging.warning(f"Series has no variation (min=max={series.min()})")
+                return pd.Series(0.5, index=series.index)
+
+            # Log input series stats
+            logging.info(f"Normalizing series - min: {series.min():.4f}, max: {series.max():.4f}")
+
+            scaler = MinMaxScaler()
+            series_values = series.values.reshape(-1, 1)
+            normalized_values = scaler.fit_transform(series_values).flatten()
+
+            result = pd.Series(normalized_values, index=series.index)
+            logging.info(f"Normalized result - min: {result.min():.4f}, max: {result.max():.4f}")
+
+            return result
+        except Exception as e:
+            logging.error(f"Error in normalization: {e}")
+            return series
 
     def rescale(self, series, new_min=0, new_max=1):
-        if not isinstance(series, pd.Series):
-            series = pd.Series(series)
-        old_min, old_max = series.min(), series.max()
-        rescaled_values = new_min + (new_max - new_min) * (series - old_min) / (old_max - old_min)
-        return pd.Series(rescaled_values, index=series.index)
+        try:
+            if not isinstance(series, pd.Series):
+                series = pd.Series(series)
+
+            # Check for invalid values
+            if series.isna().any():
+                logging.error(f"Input series contains NaN values")
+                return series
+
+            if series.min() == series.max():
+                logging.warning(f"Series has no variation (min=max={series.min()})")
+                return pd.Series(new_min, index=series.index)
+
+            # Log input series stats
+            logging.info(f"Rescaling series - min: {series.min():.4f}, max: {series.max():.4f}")
+
+            old_min, old_max = series.min(), series.max()
+            rescaled_values = new_min + (new_max - new_min) * (series - old_min) / (old_max - old_min)
+
+            result = pd.Series(rescaled_values, index=series.index)
+            logging.info(f"Rescaled result - min: {result.min():.4f}, max: {result.max():.4f}")
+
+            return result
+        except Exception as e:
+            logging.error(f"Error in rescaling: {e}")
+            return series
 
     def n_rsi(self, series, n1, n2):
-        rsi = RSIIndicator(series, window=n1).rsi()
-        return self.rescale(rsi.ewm(span=n2, adjust=False).mean())
+        try:
+            # Calculate RSI
+            rsi = RSIIndicator(series, window=n1).rsi()
+
+            # Handle NaN values at the start of the series
+            rsi = rsi.fillna(50)  # Fill initial NaNs with neutral value
+
+            # Apply smoothing
+            smoothed = rsi.ewm(span=n2, adjust=False).mean()
+
+            # Log the ranges
+            logging.info(f"Raw RSI range: {rsi.min():.4f} to {rsi.max():.4f}")
+            logging.info(f"Smoothed RSI range: {smoothed.min():.4f} to {smoothed.max():.4f}")
+
+            return self.rescale(smoothed)
+        except Exception as e:
+            logging.error(f"Error calculating RSI: {e}")
+            return pd.Series(0.5, index=series.index)
 
     def n_cci(self, high, low, close, n1, n2):
-        cci = CCIIndicator(high, low, close, window=n1).cci()
-        return self.normalize(cci.ewm(span=n2, adjust=False).mean())
+        try:
+            # Calculate CCI
+            cci = CCIIndicator(high, low, close, window=n1).cci()
+
+            # Handle NaN values at the start of the series
+            cci = cci.fillna(0)  # Fill initial NaNs with neutral value
+
+            # Apply smoothing
+            smoothed = cci.ewm(span=n2, adjust=False).mean()
+
+            # Log the ranges
+            logging.info(f"Raw CCI range: {cci.min():.4f} to {cci.max():.4f}")
+            logging.info(f"Smoothed CCI range: {smoothed.min():.4f} to {smoothed.max():.4f}")
+
+            return self.normalize(smoothed)
+        except Exception as e:
+            logging.error(f"Error calculating CCI: {e}")
+            return pd.Series(0.5, index=close.index)
 
     def n_wt(self, hlc3, n1=10, n2=11):
-        ema1 = EMAIndicator(hlc3, window=n1).ema_indicator()
-        ema2 = EMAIndicator(abs(hlc3 - ema1), window=n1).ema_indicator()
-        ci = (hlc3 - ema1) / (0.015 * ema2)
-        wt1 = EMAIndicator(ci, window=n2).ema_indicator()
-        wt2 = SMAIndicator(wt1, window=4).sma_indicator()
-        return self.normalize(wt1 - wt2)
+        try:
+            # Calculate Wave Trend components
+            ema1 = EMAIndicator(hlc3, window=n1).ema_indicator()
+            ema2 = EMAIndicator(abs(hlc3 - ema1), window=n1).ema_indicator()
+
+            # Handle potential division by zero
+            ema2 = ema2.replace(0, np.nan)
+            ci = (hlc3 - ema1) / (0.015 * ema2)
+
+            # Calculate Wave Trend values
+            wt1 = EMAIndicator(ci, window=n2).ema_indicator()
+            wt2 = SMAIndicator(wt1, window=4).sma_indicator()
+            wt = wt1 - wt2
+
+            # Handle NaN values
+            wt = wt.fillna(0)  # Fill any remaining NaNs with neutral value
+
+            # Log the ranges
+            logging.info(f"Raw WT range: {wt.min():.4f} to {wt.max():.4f}")
+
+            return self.normalize(wt)
+        except Exception as e:
+            logging.error(f"Error calculating WT: {e}")
+            return pd.Series(0.5, index=hlc3.index)
 
     def n_adx(self, high, low, close, n1):
-        adx = ADXIndicator(high, low, close, window=n1).adx()
-        return self.rescale(adx)
+        try:
+            # Calculate ADX
+            adx = ADXIndicator(high, low, close, window=n1).adx()
+
+            # Handle NaN values at the start of the series
+            adx = adx.fillna(0)  # Fill initial NaNs with neutral value
+
+            # Log the ranges
+            logging.info(f"Raw ADX range: {adx.min():.4f} to {adx.max():.4f}")
+
+            return self.rescale(adx)
+        except Exception as e:
+            logging.error(f"Error calculating ADX: {e}")
+            return pd.Series(0.5, index=close.index)
 
     def regime_filter(self, series, high, low, use_regime_filter, threshold):
         if not use_regime_filter:
@@ -340,787 +445,413 @@ class Exchange:
 
     def generate_l_signals(self, symbol, limit=3000, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         try:
-            # Fetch OHLCV data
-            ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
+            # Fetch both timeframes
+            ohlcv_1m = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
+            # For 3m we need fewer candles to cover the same period
+            ohlcv_3m = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=int(limit/3))
 
-            return self.generate_l_signals_from_data(ohlcv_data, symbol, neighbors_count, use_adx_filter, adx_threshold)
+            # Log the actual sizes received
+            logging.info(f"[{symbol}] Fetched data sizes - 1m: {len(ohlcv_1m)}, 3m: {len(ohlcv_3m)}")
+
+            if len(ohlcv_1m) < 200 or len(ohlcv_3m) < 67:  # 67 is roughly 200/3
+                logging.warning(f"[{symbol}] Insufficient data: 1m={len(ohlcv_1m)}, 3m={len(ohlcv_3m)}")
+                return 'neutral'
+
+            logging.info(f"[{symbol}] generate_l_signals data types - 1m: {type(ohlcv_1m)}, 3m: {type(ohlcv_3m)}")
+
+            result = self.generate_l_signals_from_data(ohlcv_1m, ohlcv_3m, symbol, neighbors_count, use_adx_filter, adx_threshold)
+            # Ensure we never return None
+            return result if result is not None else 'neutral'
         except Exception as e:
-            logging.info(f"Error in fetching OHLCV data: {e}")
+            logging.error(f"Error in fetching OHLCV data for {symbol}: {e}")
             return 'neutral'
 
-    def generate_l_signals_from_data(self, ohlcv_data, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
+    def generate_l_signals_from_data(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         try:
-            df = pd.DataFrame.copy(ohlcv_data, deep=True)
+            # Log input data types
+            logging.info(f"[{symbol}] Input data types - 1m: {type(ohlcv_1m)}, 3m: {type(ohlcv_3m)}")
 
-            # Calculate technical indicators
-            df['rsi'] = self.n_rsi(df['close'], 14, 1)
-            df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)  # ADX is always calculated
-            df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-            df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
+            # print(f"[{symbol}] raw ohlcv_1m data - {ohlcv_1m}")
 
-            # Feature engineering
-            features = df[['rsi', 'adx', 'cci', 'wt']].values  # ADX included in feature set
-            feature_series = features[-1]
-            feature_arrays = features[:-1]
+            # Convert list to DataFrame if needed
+            if isinstance(ohlcv_1m, list):
+                logging.info(f"[{symbol}] Converting 1m data to DataFrame")
 
-            # Calculate Lorentzian distances and predictions
-            y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-            y_train_series = y_train_series[:-1]
-
-            predictions = []
-            distances = []
-            lastDistance = -1
-
-            for i in range(len(feature_arrays)):
-                if i % 4 == 0:
-                    d = np.log(1 + np.abs(feature_series - feature_arrays[i])).sum()
-                    if d >= lastDistance:
-                        lastDistance = d
-                        distances.append(d)
-                        predictions.append(y_train_series[i])
-                        if len(predictions) > neighbors_count:
-                            lastDistance = distances[int(neighbors_count * 3 / 4)]
-                            distances.pop(0)
-                            predictions.pop(0)
-
-            prediction = np.sum(predictions)
-
-            # Calculate EMA and SMA
-            df['ema'] = EMAIndicator(df['close'], window=200).ema_indicator()
-            df['sma'] = SMAIndicator(df['close'], window=200).sma_indicator()
-
-            # Determine trends
-            is_ema_uptrend = df['close'] > df['ema']
-            is_ema_downtrend = df['close'] < df['ema']
-            is_sma_uptrend = df['close'] > df['sma']
-            is_sma_downtrend = df['close'] < df['sma']
-
-            # Apply ADX filter if enabled
-            adx_filter = self.filter_adx(df['close'], df['high'], df['low'], adx_threshold, use_adx_filter)
-
-            # Generate signal based on prediction and trends
-            new_signal = 'neutral'
-            if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1] and adx_filter.iloc[-1]:
-                new_signal = 'long'
-            elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1] and adx_filter.iloc[-1]:
-                new_signal = 'short'
-
-            current_time = time.time()
-            logging.info(f"New signal for {symbol} : {new_signal}")
-            logging.info(f"Last signal for {symbol} : {self.last_signal.get(symbol, 'None')}")
-
-            # Avoid double entries and ensure signal change
-            if symbol in self.last_signal:
-                if self.last_signal[symbol] == new_signal and new_signal != 'neutral':
-                    # Check if sufficient time has passed to act on the same signal
-                    if current_time - self.last_signal_time[symbol] < 15:  # 15 second buffer
-                        logging.info(f"Returning {new_signal} because {self.last_signal[symbol]} is same as new signal and time difference is within buffer")
-                        return new_signal  # Return the same signal if within the buffer time
-                    else:
-                        self.last_signal_time[symbol] = current_time
-                        return new_signal
-                else:
-                    self.last_signal[symbol] = new_signal
-                    self.last_signal_time[symbol] = current_time
-                    return new_signal
+                df_1m = pd.DataFrame(ohlcv_1m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df_1m['timestamp'] = pd.to_datetime(df_1m['timestamp'], unit='ms')
+                df_1m.set_index('timestamp', inplace=True)
             else:
-                self.last_signal[symbol] = new_signal
-                self.last_signal_time[symbol] = current_time
-                return new_signal
+                df_1m = ohlcv_1m.copy()
+
+            if isinstance(ohlcv_3m, list):
+                logging.info(f"[{symbol}] Converting 3m data to DataFrame")
+
+                df_3m = pd.DataFrame(ohlcv_3m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df_3m['timestamp'] = pd.to_datetime(df_3m['timestamp'], unit='ms')
+                df_3m.set_index('timestamp', inplace=True)
+            else:
+                df_3m = ohlcv_3m.copy()
+
+            logging.info(f"[{symbol}] Data structure after conversion:")
+            logging.info(f"1m columns: {df_1m.columns.tolist()}")
+            logging.info(f"1m index type: {type(df_1m.index)}")
+            logging.info(f"1m data shape: {df_1m.shape}, 3m data shape: {df_3m.shape}")
+
+            def calculate_indicators(df):
+                """Calculate required indicators."""
+                df['rsi'] = RSIIndicator(df['close'], window=14).rsi()
+                df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)
+                df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
+                hlc3 = (df['high'] + df['low'] + df['close']) / 3
+                df['wt'] = self.n_wt(hlc3, 10, 11)
+                atr_indicator = AverageTrueRange(
+                    high=df['high'], low=df['low'], close=df['close'], window=14, fillna=True
+                )
+                df['atr'] = atr_indicator.average_true_range()
+                df['atr_pct'] = (df['atr'] / df['close']) * 100
+                return df
+
+            def calculate_trend(df):
+                """Calculate EMA and MACD for trend detection."""
+                df['ema_fast'] = EMAIndicator(df['close'], window=50, fillna=True).ema_indicator()
+                df['ema_medium'] = EMAIndicator(df['close'], window=100, fillna=True).ema_indicator()
+                df['ema_slow'] = EMAIndicator(df['close'], window=200, fillna=True).ema_indicator()
+                macd = MACD(df['close'], window_slow=26, window_fast=12, window_sign=9, fillna=True)
+                df['macd'] = macd.macd()
+                df['macd_signal'] = macd.macd_signal()
+                return df
+
+            def detect_trend(df):
+                """Detect if a strong uptrend or downtrend exists."""
+                close, ema_fast, ema_medium, ema_slow = (
+                    df['close'].iloc[-1],
+                    df['ema_fast'].iloc[-1],
+                    df['ema_medium'].iloc[-1],
+                    df['ema_slow'].iloc[-1],
+                )
+                macd, macd_signal = df['macd'].iloc[-1], df['macd_signal'].iloc[-1]
+                is_uptrend = close > ema_fast > ema_medium > ema_slow and macd > macd_signal
+                is_downtrend = close < ema_fast < ema_medium < ema_slow and macd < macd_signal
+                return is_uptrend, is_downtrend
+
+
+            def calculate_weighted_signal(data, weights):
+                """
+                Calculate weighted trading signal optimized for minute-scale crypto scalping.
+                Returns a value between -1 (strong sell) and 1 (strong buy).
+                """
+                try:
+                    # 1. Price Momentum Component
+                    price_momentum = (data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"]
+
+                    # 2. MACD Component
+                    macd_signal = (data["MACD"] - data["MACD_Signal"]) / abs(data["MACD_Signal"])
+                    macd_signal = max(min(macd_signal, 1), -1)  # Bound between -1 and 1
+
+                    # 3. EMA Trend Component
+                    if data["Close"] > data["EMA_Fast"] > data["EMA_Medium"]:
+                        ema_trend = min((data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"], 1)
+                    elif data["Close"] < data["EMA_Fast"] < data["EMA_Medium"]:
+                        ema_trend = max((data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"], -1)
+                    else:
+                        ema_trend = (data["Close"] - data["EMA_Medium"]) / data["EMA_Medium"]
+
+                    # 4. Volatility Component
+                    volatility_signal = min(data["ATR"] / data["Close"], 0.1)
+
+                    # 5. Calculate weighted signal
+                    weighted_signal = (
+                        price_momentum * weights["EMA_Fast"] +
+                        macd_signal * weights["MACD"] +
+                        ema_trend * weights["EMA_Medium"] +
+                        volatility_signal * weights["ATR"]
+                    )
+
+                    # 6. Add prediction if available
+                    if "Prediction" in data and "Max_Prediction" in data and data["Max_Prediction"] != 0:
+                        prediction = (data["Prediction"] / data["Max_Prediction"]) * 2 - 1
+                        weighted_signal += prediction * weights["Prediction"]
+
+                    # 7. Bound final signal
+                    final_signal = max(min(weighted_signal, 1.0), -1.0)
+
+                    # 8. Log components and weights
+                    logging.info(f"[{symbol}] Signal Components")
+                    logging.info(f"[{symbol}] Price Momentum ({weights['EMA_Fast']:.2f}): {price_momentum:.3f}")
+                    logging.info(f"[{symbol}] MACD ({weights['MACD']:.2f}): {macd_signal:.3f}")
+                    logging.info(f"[{symbol}] EMA Trend ({weights['EMA_Medium']:.2f}): {ema_trend:.3f}")
+                    logging.info(f"[{symbol}] Volatility ({weights['ATR']:.2f}): {volatility_signal:.3f}")
+                    logging.info(f"[{symbol}] Prediction ({weights['Prediction']:.2f}): {prediction:.3f}")
+                    logging.info(f"[{symbol}] Final: {final_signal:.3f}")
+                    logging.info(f"[{symbol}] Price: {data['Close']:.2f}")
+
+                    return final_signal
+
+                except Exception as e:
+                    logging.error(f"[{symbol}] Error in calculate_weighted_signal: {e}")
+                    return 0.0
+
+            # Calculate indicators
+            try:
+                logging.info(f"[{symbol}] Starting indicator calculations")
+
+                # Calculate indicators
+                df_1m = calculate_indicators(df_1m)
+                df_3m = calculate_trend(df_3m)
+
+                try:
+                    logging.info(f"[{symbol}] 3m indicators calculated successfully")
+                    logging.info(f"[{symbol}] EMA ranges - Fast: {df_3m['ema_fast'].min():.4f} to {df_3m['ema_fast'].max():.4f}")
+                    logging.info(f"[{symbol}] EMA ranges - Medium: {df_3m['ema_medium'].min():.4f} to {df_3m['ema_medium'].max():.4f}")
+                    logging.info(f"[{symbol}] EMA ranges - Slow: {df_3m['ema_slow'].min():.4f} to {df_3m['ema_slow'].max():.4f}")
+                    logging.info(f"[{symbol}] MACD range: {df_3m['macd'].min():.4f} to {df_3m['macd'].max():.4f}")
+                except Exception as e:
+                    logging.error(f"[{symbol}] 3m indicator calculation failed: {e}")
+                    return 'neutral'
+
+                # Verify no NaN values in critical columns
+                critical_1m_cols = ['rsi', 'adx', 'cci', 'wt', 'atr', 'atr_pct']
+                critical_3m_cols = ['ema_fast', 'ema_medium', 'ema_slow', 'macd', 'macd_signal']
+
+                # Check latest values
+                latest_1m = df_1m[critical_1m_cols].iloc[-1]
+                latest_3m = df_3m[critical_3m_cols].iloc[-1]
+
+                nan_1m = latest_1m.isna().sum()
+                nan_3m = latest_3m.isna().sum()
+
+                if nan_1m > 0 or nan_3m > 0:
+                    logging.error(f"[{symbol}] NaN values in latest bar - 1m: {nan_1m}, 3m: {nan_3m}")
+                    logging.error(f"[{symbol}] 1m values: {latest_1m.to_dict()}")
+                    logging.error(f"[{symbol}] 3m values: {latest_3m.to_dict()}")
+
+                    # Log the last few rows of price data
+                    logging.error(f"[{symbol}] Last 5 rows of 1m price data:")
+                    logging.error(df_1m[['open', 'high', 'low', 'close']].tail().to_string())
+                    return 'neutral'
+
+                logging.info(f"[{symbol}] All indicators calculated successfully")
+
+            except Exception as e:
+                logging.error(f"[{symbol}] Error calculating indicators: {e}")
+                logging.error(f"[{symbol}] {traceback.format_exc()}")
+                return 'neutral'
+
+            # Detect trend
+            is_strong_uptrend, is_strong_downtrend = detect_trend(df_3m)
+
+            logging.info(f"[{symbol}] 3m Trend Analysis:")
+            logging.info(f"[{symbol}] Close: {df_3m['close'].iloc[-1]:.4f}")
+            logging.info(f"[{symbol}] EMA Fast: {df_3m['ema_fast'].iloc[-1]:.4f}")
+            logging.info(f"[{symbol}] EMA Medium: {df_3m['ema_medium'].iloc[-1]:.4f}")
+            logging.info(f"[{symbol}] EMA Slow: {df_3m['ema_slow'].iloc[-1]:.4f}")
+            logging.info(f"[{symbol}] MACD: {df_3m['macd'].iloc[-1]:.4f}")
+            logging.info(f"[{symbol}] MACD Signal: {df_3m['macd_signal'].iloc[-1]:.4f}")
+            logging.info(f"[{symbol}] Strong Uptrend: {is_strong_uptrend}")
+            logging.info(f"[{symbol}] Strong Downtrend: {is_strong_downtrend}")
+
+            # Calculate market regime from 1m data
+            market_regime = self.detect_market_regime(df_1m)
+            # logging.info(f"[{symbol}] Detecting market regime - atr_pct: {df_1m['atr_pct'].iloc[-1]}")
+
+            logging.info(f"[{symbol}] Market Regime: {market_regime}")
+            latest_atr_pct = df_1m['atr_pct'].iloc[-1]
+            logging.info(f"[{symbol}] ATR %: {latest_atr_pct:.4f}")
+
+            # Prepare data for weighted signal calculation
+            signal_data = {
+                "Close": df_3m['close'].iloc[-1],
+                'MACD': df_3m['macd'].iloc[-1],
+                'MACD_Signal': df_3m['macd_signal'].iloc[-1],
+                'EMA_Fast': df_3m['ema_fast'].iloc[-1],
+                'EMA_Medium': df_3m['ema_medium'].iloc[-1],
+                'ATR': df_1m['atr'].iloc[-1],
+            }
+
+            # Calculate prediction if using nearest neighbor analysis
+            if neighbors_count > 0:
+                features = df_1m[['rsi', 'adx', 'cci', 'wt']].values
+                target = np.where(df_1m['close'].shift(-4) > df_1m['close'], 1, -1)[:-1]
+                feature_series = features[-1]
+                distances = np.linalg.norm(features[:-1] - feature_series, axis=1)
+                nearest_neighbors = target[np.argsort(distances)[:neighbors_count]]
+                prediction = np.sum(nearest_neighbors)
+
+                signal_data.update({
+                    "Prediction": prediction,
+                    "Max_Prediction": neighbors_count
+                })
+
+            # Base weights for minute-scale crypto scalping
+            base_weights = {
+                "MACD": 0.40,      # Primary momentum indicator
+                "EMA_Fast": 0.25,  # Quick trend confirmation
+                "EMA_Medium": 0.15,# Baseline trend
+                "ATR": 0.15,       # Volatility component
+                "Prediction": 0.05 # Minor ML influence
+            }
+
+            # Get market regime and volatility metrics
+            # market_regime = self.detect_market_regime(df_1m)
+            current_volatility = df_1m['atr_pct'].iloc[-1]
+            price_momentum = df_1m['close'].pct_change(3).iloc[-1]  # 3-minute momentum
+
+            # Adjust weights based on market regime
+            weights = base_weights.copy()
+
+            if market_regime == "volatile":
+                if current_volatility > 3.0:  # High volatility regime
+                    weights["MACD"] *= 1.5     # Strong emphasis on momentum
+                    weights["EMA_Fast"] *= 1.2 # Quick trend confirmation
+                    weights["EMA_Medium"] *= 0.5  # Reduce longer-term influence
+                    weights["ATR"] *= 1.3      # Higher volatility awareness
+                    weights["Prediction"] *= 0.4  # Reduce ML in high volatility
+
+                    if abs(price_momentum) > 0.005:  # Strong 3-min momentum (0.5%)
+                        weights["MACD"] *= 1.2       # Further increase momentum weight
+                        weights["EMA_Fast"] *= 1.3   # Stronger trend following
+                else:  # Moderate volatility
+                    weights["MACD"] *= 1.3
+                    weights["EMA_Fast"] *= 1.1
+                    weights["ATR"] *= 1.2
+
+            elif market_regime == "ranging":
+                # Ranging market - focus on reversals
+                weights["MACD"] *= 1.2      # Catch momentum shifts
+                weights["EMA_Fast"] *= 0.8  # Reduce trend following
+                weights["EMA_Medium"] *= 0.6 # Minimal baseline trend influence
+                weights["ATR"] *= 1.4       # Watch for breakouts
+                weights["Prediction"] *= 1.2 # Increase ML for range trading
+
+                if current_volatility < 1.0:  # Low volatility ranging
+                    weights["MACD"] *= 0.8    # Reduce momentum sensitivity
+                    weights["ATR"] *= 1.5     # Higher breakout sensitivity
+
+            elif market_regime == "trending":
+                # Clear trend - follow the momentum
+                weights["MACD"] *= 1.3
+                weights["EMA_Fast"] *= 1.4
+                weights["EMA_Medium"] *= 1.2
+                weights["ATR"] *= 0.8
+                weights["Prediction"] *= 0.7
+
+                if abs(price_momentum) > 0.003:  # Strong trend momentum
+                    weights["MACD"] *= 1.2
+                    weights["EMA_Fast"] *= 1.3
+
+            else:  # normal regime
+                # Balanced weights with slight momentum bias
+                if current_volatility > 1.5:  # Above average volatility
+                    weights["MACD"] *= 1.2
+                    weights["ATR"] *= 1.1
+                elif current_volatility < 0.5:  # Below average volatility
+                    weights["MACD"] *= 0.9
+                    weights["ATR"] *= 1.3
+                    weights["Prediction"] *= 1.2
+
+            # Quick momentum adjustment for all regimes
+            if abs(price_momentum) > 0.008:  # Strong momentum (0.8% in 3 mins)
+                weights["MACD"] *= 1.3
+                weights["EMA_Fast"] *= 1.2
+                weights["EMA_Medium"] *= 0.7
+
+            # Normalize weights to sum to 1
+            total_weight = sum(weights.values())
+            weights = {k: v / total_weight for k, v in weights.items()}
+
+            logging.info(f"""[{symbol}] Minute-Scale Regime Weights:
+                [{symbol}] Market Regime: {market_regime}
+                [{symbol}] Current Volatility: {current_volatility:.3f}%
+                [{symbol}] 3-min Momentum: {price_momentum:.3f}%
+                [{symbol}] Weights: {json.dumps(weights)}
+            """)
+
+            # Calculate weighted signal with adjusted weights
+            weighted_signal = calculate_weighted_signal(signal_data, weights)
+
+            logging.info(f"[{symbol}] Weighted Signal: {weighted_signal:.3f}")
+
+            # More aggressive thresholds for minute-scale trading
+            if weighted_signal > 0.25:    # Reduced threshold for faster entries
+                return "long"
+            elif weighted_signal < -0.25:  # Reduced threshold for faster entries
+                return "short"
+            else:
+                return "neutral"
+
         except Exception as e:
-            print(traceback.format_exc())
-            logging.info(f"Error in calculating signal: {e}")
-            return 'neutral'
-
-    # def generate_l_signals(self, symbol, limit=3000, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
-    #     try:
-    #         # Fetch OHLCV data
-    #         ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
-    #         df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    #         df.set_index('timestamp', inplace=True)
-
-    #         # Calculate technical indicators
-    #         df['rsi'] = self.n_rsi(df['close'], 14, 1)
-    #         df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)  # ADX is always calculated
-    #         df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-    #         df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
-
-    #         # Feature engineering
-    #         features = df[['rsi', 'adx', 'cci', 'wt']].values  # ADX included in feature set
-    #         feature_series = features[-1]
-    #         feature_arrays = features[:-1]
-
-    #         # Calculate Lorentzian distances and predictions
-    #         y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-    #         y_train_series = y_train_series[:-1]
-
-    #         predictions = []
-    #         distances = []
-    #         lastDistance = -1
-
-    #         for i in range(len(feature_arrays)):
-    #             if i % 4 == 0:
-    #                 d = np.log(1 + np.abs(feature_series - feature_arrays[i])).sum()
-    #                 if d >= lastDistance:
-    #                     lastDistance = d
-    #                     distances.append(d)
-    #                     predictions.append(y_train_series[i])
-    #                     if len(predictions) > neighbors_count:
-    #                         lastDistance = distances[int(neighbors_count * 3 / 4)]
-    #                         distances.pop(0)
-    #                         predictions.pop(0)
-
-    #         prediction = np.sum(predictions)
-
-    #         # Calculate EMA and SMA
-    #         df['ema'] = EMAIndicator(df['close'], window=200).ema_indicator()
-    #         df['sma'] = SMAIndicator(df['close'], window=200).sma_indicator()
-
-    #         # Determine trends
-    #         is_ema_uptrend = df['close'] > df['ema']
-    #         is_ema_downtrend = df['close'] < df['ema']
-    #         is_sma_uptrend = df['close'] > df['sma']
-    #         is_sma_downtrend = df['close'] < df['sma']
-
-    #         # Apply ADX filter if enabled
-    #         adx_filter = self.filter_adx(df['close'], df['high'], df['low'], adx_threshold, use_adx_filter)
-
-    #         # Generate signal based on prediction and trends
-    #         new_signal = 'neutral'
-    #         if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1] and adx_filter.iloc[-1]:
-    #             new_signal = 'long'
-    #         elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1] and adx_filter.iloc[-1]:
-    #             new_signal = 'short'
-
-    #         # Avoid double entries and ensure signal change
-    #         if hasattr(self, 'last_signal'):
-    #             if self.last_signal == new_signal:
-    #                 return 'neutral'
-    #             else:
-    #                 self.last_signal = new_signal
-    #                 return new_signal
-    #         else:
-    #             self.last_signal = new_signal
-    #             return new_signal
-    #     except Exception as e:
-    #         logging.info(f"Error in calculating signal: {e}")
-    #         return 'neutral'
-
-    # def normalize(self, series):
-    #     if not isinstance(series, pd.Series):
-    #         series = pd.Series(series)
-    #     scaler = MinMaxScaler()
-    #     series_values = series.values.reshape(-1, 1)
-    #     normalized_values = scaler.fit_transform(series_values).flatten()
-    #     return pd.Series(normalized_values, index=series.index)
-
-    # def rescale(self, series, new_min=0, new_max=1):
-    #     if not isinstance(series, pd.Series):
-    #         series = pd.Series(series)
-    #     old_min, old_max = series.min(), series.max()
-    #     rescaled_values = new_min + (new_max - new_min) * (series - old_min) / (old_max - old_min)
-    #     return pd.Series(rescaled_values, index=series.index)
-
-    # def n_rsi(self, series, n1, n2):
-    #     rsi = RSIIndicator(series, window=n1).rsi()
-    #     return self.rescale(rsi.ewm(span=n2, adjust=False).mean())
-
-    # def n_cci(self, high, low, close, n1, n2):
-    #     cci = CCIIndicator(high, low, close, window=n1).cci()
-    #     return self.normalize(cci.ewm(span=n2, adjust=False).mean())
-
-    # def n_wt(self, hlc3, n1=10, n2=11):
-    #     ema1 = EMAIndicator(hlc3, window=n1).ema_indicator()
-    #     ema2 = EMAIndicator(abs(hlc3 - ema1), window=n1).ema_indicator()
-    #     ci = (hlc3 - ema1) / (0.015 * ema2)
-    #     wt1 = EMAIndicator(ci, window=n2).ema_indicator()
-    #     wt2 = SMAIndicator(wt1, window=4).sma_indicator()
-    #     return self.normalize(wt1 - wt2)
-
-    # def n_adx(self, high, low, close, n1):
-    #     adx = ADXIndicator(high, low, close, window=n1).adx()
-    #     return self.rescale(adx)
-
-    # def regime_filter(self, series, high, low, use_regime_filter, threshold):
-    #     if not use_regime_filter:
-    #         return pd.Series([True] * len(series))
-
-    #     def klmf(series, high, low):
-    #         value1 = pd.Series(0, index=series.index)
-    #         value2 = pd.Series(0, index=series.index)
-    #         klmf = pd.Series(0, index=series.index)
-    #         for i in range(1, len(series)):
-    #             value1[i] = 0.2 * (series[i] - series[i - 1]) + 0.8 * value1[i - 1]
-    #             value2[i] = 0.1 * (high[i] - low[i]) + 0.8 * value2[i - 1]
-    #         omega = abs(value1 / value2)
-    #         alpha = (-omega ** 2 + np.sqrt(omega ** 4 + 16 * omega ** 2)) / 8
-    #         for i in range(1, len(series)):
-    #             klmf[i] = alpha[i] * series[i] + (1 - alpha[i]) * klmf[i - 1]
-    #         return klmf
-
-    #     klmf_values = klmf(series, high, low)
-    #     abs_curve_slope = abs(klmf_values.diff())
-    #     exponential_average_abs_curve_slope = EMAIndicator(abs_curve_slope, window=200).ema_indicator()
-    #     normalized_slope_decline = (abs_curve_slope - exponential_average_abs_curve_slope) / exponential_average_abs_curve_slope
-    #     return normalized_slope_decline >= threshold
-
-    # def filter_adx(self, close, high, low, adx_threshold, use_adx_filter, length=14):
-    #     if not use_adx_filter:
-    #         return pd.Series([True] * len(close))
-    #     adx = ADXIndicator(high, low, close, window=length).adx()
-    #     return adx > adx_threshold
-
-    # def filter_volatility(self, high, low, close, use_volatility_filter, min_length=1, max_length=10):
-    #     if not use_volatility_filter:
-    #         return pd.Series([True] * len(close))
-    #     recent_atr = AverageTrueRange(high, low, close, window=min_length).average_true_range()
-    #     historical_atr = AverageTrueRange(high, low, close, window=max_length).average_true_range()
-    #     return recent_atr > historical_atr
-
-    # def lorentzian_distance(self, feature_series, feature_arrays):
-    #     distances = np.log(1 + np.abs(feature_series - feature_arrays))
-    #     return distances.sum(axis=1)
-
-    # def generate_l_signals(self, symbol, limit=3000, neighbors_count=8):
-    #     try:
-    #         # Fetch OHLCV data
-    #         ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
-    #         df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    #         df.set_index('timestamp', inplace=True)
-
-    #         # Calculate technical indicators
-    #         df['rsi'] = self.n_rsi(df['close'], 14, 1)
-    #         df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)
-    #         df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-    #         df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
-
-    #         # Feature engineering
-    #         features = df[['rsi', 'adx', 'cci', 'wt']].values
-    #         feature_series = features[-1]
-    #         feature_arrays = features[:-1]
-
-    #         # Calculate Lorentzian distances and predictions
-    #         y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-    #         y_train_series = y_train_series[:-1]
-
-    #         predictions = []
-    #         distances = []
-    #         lastDistance = -1
-
-    #         for i in range(len(feature_arrays)):
-    #             if i % 4 == 0:
-    #                 d = np.log(1 + np.abs(feature_series - feature_arrays[i])).sum()
-    #                 if d >= lastDistance:
-    #                     lastDistance = d
-    #                     distances.append(d)
-    #                     predictions.append(y_train_series[i])
-    #                     if len(predictions) > neighbors_count:
-    #                         lastDistance = distances[int(neighbors_count * 3 / 4)]
-    #                         distances.pop(0)
-    #                         predictions.pop(0)
-
-    #         prediction = np.sum(predictions)
-
-    #         # Calculate EMA and SMA
-    #         df['ema'] = EMAIndicator(df['close'], window=200).ema_indicator()
-    #         df['sma'] = SMAIndicator(df['close'], window=200).sma_indicator()
-
-    #         # Determine trends
-    #         is_ema_uptrend = df['close'] > df['ema']
-    #         is_ema_downtrend = df['close'] < df['ema']
-    #         is_sma_uptrend = df['close'] > df['sma']
-    #         is_sma_downtrend = df['close'] < df['sma']
-
-    #         # Generate signal based on prediction and trends
-    #         new_signal = 'neutral'
-    #         if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1]:
-    #             new_signal = 'long'
-    #         elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1]:
-    #             new_signal = 'short'
-
-    #         # Avoid double entries and ensure signal change
-    #         if hasattr(self, 'last_signal'):
-    #             if self.last_signal == new_signal:
-    #                 return 'neutral'
-    #             else:
-    #                 self.last_signal = new_signal
-    #                 return new_signal
-    #         else:
-    #             self.last_signal = new_signal
-    #             return new_signal
-    #     except Exception as e:
-    #         logging.info(f"Error in calculating signal: {e}")
-    #         return 'neutral'
-
-    # def normalize(self, series):
-    #     scaler = MinMaxScaler()
-    #     series_values = series.values.reshape(-1, 1)  # Convert to 2D array for scaler
-    #     normalized_values = scaler.fit_transform(series_values).flatten()
-    #     return pd.Series(normalized_values, index=series.index)
-
-    # def rescale(self, series, new_min=0, new_max=1):
-    #     old_min, old_max = series.min(), series.max()
-    #     rescaled_values = new_min + (new_max - new_min) * (series - old_min) / (old_max - old_min)
-    #     return pd.Series(rescaled_values, index=series.index)
-
-    # def n_rsi(self, series, n1, n2):
-    #     rsi = RSIIndicator(series, window=n1).rsi()
-    #     return self.rescale(rsi.ewm(span=n2, adjust=False).mean())
-
-    # def n_cci(self, high, low, close, n1, n2):
-    #     cci = CCIIndicator(high, low, close, window=n1).cci()
-    #     return self.normalize(cci.ewm(span=n2, adjust=False).mean())
-
-    # def n_wt(self, hlc3, n1=10, n2=11):
-    #     ema1 = EMAIndicator(hlc3, window=n1).ema_indicator()
-    #     ema2 = EMAIndicator(abs(hlc3 - ema1), window=n1).ema_indicator()
-    #     ci = (hlc3 - ema1) / (0.015 * ema2)
-    #     wt1 = EMAIndicator(ci, window=n2).ema_indicator()
-    #     wt2 = SMAIndicator(wt1, window=4).sma_indicator()
-    #     return self.normalize(wt1 - wt2)
-
-    # def n_adx(self, high, low, close, n1):
-    #     adx = ADXIndicator(high, low, close, window=n1).adx()
-    #     return self.rescale(adx)
-
-    # def regime_filter(self, series, high, low, use_regime_filter, threshold):
-    #     if not use_regime_filter:
-    #         return pd.Series([True] * len(series))
-
-    #     def klmf(series, high, low):
-    #         value1 = pd.Series(0, index=series.index)
-    #         value2 = pd.Series(0, index=series.index)
-    #         klmf = pd.Series(0, index=series.index)
-    #         for i in range(1, len(series)):
-    #             value1[i] = 0.2 * (series[i] - series[i - 1]) + 0.8 * value1[i - 1]
-    #             value2[i] = 0.1 * (high[i] - low[i]) + 0.8 * value2[i - 1]
-    #         omega = abs(value1 / value2)
-    #         alpha = (-omega ** 2 + np.sqrt(omega ** 4 + 16 * omega ** 2)) / 8
-    #         for i in range(1, len(series)):
-    #             klmf[i] = alpha[i] * series[i] + (1 - alpha[i]) * klmf[i - 1]
-    #         return klmf
-
-    #     klmf_values = klmf(series, high, low)
-    #     abs_curve_slope = abs(klmf_values.diff())
-    #     exponential_average_abs_curve_slope = EMAIndicator(abs_curve_slope, window=200).ema_indicator()
-    #     normalized_slope_decline = (abs_curve_slope - exponential_average_abs_curve_slope) / exponential_average_abs_curve_slope
-    #     return normalized_slope_decline >= threshold
-
-    # def filter_adx(self, close, high, low, adx_threshold, use_adx_filter, length=14):
-    #     if not use_adx_filter:
-    #         return pd.Series([True] * len(close))
-    #     adx = ADXIndicator(high, low, close, window=length).adx()
-    #     return adx > adx_threshold
-
-    # def filter_volatility(self, high, low, close, use_volatility_filter, min_length=1, max_length=10):
-    #     if not use_volatility_filter:
-    #         return pd.Series([True] * len(close))
-    #     recent_atr = AverageTrueRange(high, low, close, window=min_length).average_true_range()
-    #     historical_atr = AverageTrueRange(high, low, close, window=max_length).average_true_range()
-    #     return recent_atr > historical_atr
-
-    # def lorentzian_distance(self, feature_series, feature_arrays):
-    #     distances = np.log(1 + np.abs(feature_series - feature_arrays))
-    #     return distances.sum(axis=1)
-
-    # def generate_l_signals(self, symbol, limit=3000, neighbors_count=8):
-    #     # Fetch OHLCV data
-    #     ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
-    #     df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    #     df.set_index('timestamp', inplace=True)
-
-    #     # Calculate technical indicators
-    #     df['rsi'] = self.n_rsi(df['close'], 14, 1)
-    #     df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)
-    #     df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-    #     df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
-
-    #     # Feature engineering
-    #     features = df[['rsi', 'adx', 'cci', 'wt']].values
-
-    #     # Training labels (future price movement)
-    #     y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-    #     y_train_series = y_train_series[:-1]
-
-    #     # Initialize variables for prediction logic
-    #     predictions = []
-    #     distances = []
-    #     lastDistance = -1
-
-    #     for j in range(len(features)):
-    #         if j >= limit - 1:  # maxBarsBack equivalent
-    #             for i in range(min(j, limit - 1)):
-    #                 d = 0
-    #                 for feature_idx in range(features.shape[1]):
-    #                     d += np.log(1 + np.abs(features[j][feature_idx] - features[i][feature_idx]))
-    #                 if d >= lastDistance and i % 4 == 0:
-    #                     lastDistance = d
-    #                     distances.append(d)
-    #                     predictions.append(y_train_series[i])
-    #                     if len(predictions) > neighbors_count:
-    #                         lastDistance = distances[int(neighbors_count * 3 / 4)]
-    #                         distances.pop(0)
-    #                         predictions.pop(0)
-
-    #             prediction = sum(predictions)
-    #         else:
-    #             prediction = 0
-
-    #     # Calculate EMA and SMA
-    #     df['ema'] = EMAIndicator(df['close'], window=200).ema_indicator()
-    #     df['sma'] = SMAIndicator(df['close'], window=200).sma_indicator()
-
-    #     # Determine trends
-    #     is_ema_uptrend = df['close'] > df['ema']
-    #     is_ema_downtrend = df['close'] < df['ema']
-    #     is_sma_uptrend = df['close'] > df['sma']
-    #     is_sma_downtrend = df['close'] < df['sma']
-
-    #     # Generate signal based on prediction and trends
-    #     new_signal = 'neutral'
-    #     if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1]:
-    #         new_signal = 'long'
-    #     elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1]:
-    #         new_signal = 'short'
-
-    #     # Avoid double entries and ensure signal change
-    #     if hasattr(self, 'last_signal'):
-    #         if self.last_signal == new_signal:
-    #             return 'neutral'
-    #         else:
-    #             self.last_signal = new_signal
-    #             return new_signal
-    #     else:
-    #         self.last_signal = new_signal
-    #         return new_signal
-
-    # # Credit to 53RG0
-    # def normalize(self, series):
-    #     scaler = MinMaxScaler()
-    #     series_values = series.values.reshape(-1, 1)  # Convert to 2D array for scaler
-    #     normalized_values = scaler.fit_transform(series_values).flatten()
-    #     return pd.Series(normalized_values, index=series.index)
-
-    # def rescale(self, series, new_min=0, new_max=1):
-    #     old_min, old_max = series.min(), series.max()
-    #     rescaled_values = new_min + (new_max - new_min) * (series - old_min) / (old_max - old_min)
-    #     return pd.Series(rescaled_values, index=series.index)
-
-    # def n_rsi(self, series, n1, n2):
-    #     rsi = RSIIndicator(series, window=n1).rsi()
-    #     return self.rescale(rsi.ewm(span=n2, adjust=False).mean())
-
-    # def n_cci(self, high, low, close, n1, n2):
-    #     cci = CCIIndicator(high, low, close, window=n1).cci()
-    #     return self.normalize(cci.ewm(span=n2, adjust=False).mean())
-
-    # def n_wt(self, hlc3, n1=10, n2=11):
-    #     ema1 = EMAIndicator(hlc3, window=n1).ema_indicator()
-    #     ema2 = EMAIndicator(abs(hlc3 - ema1), window=n1).ema_indicator()
-    #     ci = (hlc3 - ema1) / (0.015 * ema2)
-    #     wt1 = EMAIndicator(ci, window=n2).ema_indicator()
-    #     wt2 = SMAIndicator(wt1, window=4).sma_indicator()
-    #     return self.normalize(wt1 - wt2)
-
-    # def n_adx(self, high, low, close, n1):
-    #     adx = ADXIndicator(high, low, close, window=n1).adx()
-    #     return self.rescale(adx)
-
-    # def regime_filter(self, series, high, low, use_regime_filter, threshold):
-    #     if not use_regime_filter:
-    #         return pd.Series([True] * len(series))
-
-    #     def klmf(series, high, low):
-    #         value1 = pd.Series(0, index=series.index)
-    #         value2 = pd.Series(0, index=series.index)
-    #         klmf = pd.Series(0, index=series.index)
-    #         for i in range(1, len(series)):
-    #             value1[i] = 0.2 * (series[i] - series[i - 1]) + 0.8 * value1[i - 1]
-    #             value2[i] = 0.1 * (high[i] - low[i]) + 0.8 * value2[i - 1]
-    #         omega = abs(value1 / value2)
-    #         alpha = (-omega ** 2 + np.sqrt(omega ** 4 + 16 * omega ** 2)) / 8
-    #         for i in range(1, len(series)):
-    #             klmf[i] = alpha[i] * series[i] + (1 - alpha[i]) * klmf[i - 1]
-    #         return klmf
-
-    #     klmf_values = klmf(series, high, low)
-    #     abs_curve_slope = abs(klmf_values.diff())
-    #     exponential_average_abs_curve_slope = EMAIndicator(abs_curve_slope, window=200).ema_indicator()
-    #     normalized_slope_decline = (abs_curve_slope - exponential_average_abs_curve_slope) / exponential_average_abs_curve_slope
-    #     return normalized_slope_decline >= threshold
-
-    # def filter_adx(self, close, high, low, adx_threshold, use_adx_filter, length=14):
-    #     if not use_adx_filter:
-    #         return pd.Series([True] * len(close))
-    #     adx = ADXIndicator(high, low, close, window=length).adx()
-    #     return adx > adx_threshold
-
-    # def filter_volatility(self, high, low, close, use_volatility_filter, min_length=1, max_length=10):
-    #     if not use_volatility_filter:
-    #         return pd.Series([True] * len(close))
-    #     recent_atr = AverageTrueRange(high, low, close, window=min_length).average_true_range()
-    #     historical_atr = AverageTrueRange(high, low, close, window=max_length).average_true_range()
-    #     return recent_atr > historical_atr
-
-    # def lorentzian_distance(self, feature_series, feature_arrays):
-    #     distances = np.log(1 + np.abs(feature_series - feature_arrays))
-    #     return distances.sum(axis=1)
-
-    # def generate_l_signals(self, symbol, limit=3000, neighbors_count=8):
-    #     # Fetch OHLCV data
-    #     ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='3m', limit=limit)
-    #     df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    #     df.set_index('timestamp', inplace=True)
-
-    #     # Calculate technical indicators
-    #     df['rsi'] = self.n_rsi(df['close'], 14, 1)
-    #     df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)
-    #     df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-    #     df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
-
-    #     # Feature engineering
-    #     features = df[['rsi', 'adx', 'cci', 'wt']].values
-    #     feature_series = features[-1]
-    #     feature_arrays = features[:-1]
-
-    #     # Calculate Lorentzian distances
-    #     distances = self.lorentzian_distance(feature_series, feature_arrays)
-    #     nearest_indices = distances.argsort()[:neighbors_count]
-
-    #     # Training labels (future price movement)
-    #     y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-    #     y_train_series = y_train_series[:-1]
-    #     predictions = y_train_series[nearest_indices]
-    #     prediction = np.sum(predictions)
-
-    #     # Calculate EMA and SMA
-    #     df['ema'] = EMAIndicator(df['close'], window=200).ema_indicator()
-    #     df['sma'] = SMAIndicator(df['close'], window=200).sma_indicator()
-
-    #     # Determine trends
-    #     is_ema_uptrend = df['close'] > df['ema']
-    #     is_ema_downtrend = df['close'] < df['ema']
-    #     is_sma_uptrend = df['close'] > df['sma']
-    #     is_sma_downtrend = df['close'] < df['sma']
-
-    #     # Generate signal based on prediction and trends
-    #     new_signal = 'neutral'
-    #     if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1]:
-    #         new_signal = 'long'
-    #     elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1]:
-    #         new_signal = 'short'
-
-    #     # Avoid double entries and ensure signal change
-    #     if hasattr(self, 'last_signal'):
-    #         if self.last_signal == new_signal:
-    #             return 'neutral'
-    #         else:
-    #             self.last_signal = new_signal
-    #             return new_signal
-    #     else:
-    #         self.last_signal = new_signal
-    #         return new_signal
-
-
-    # Works but maybe keeps old signal
-    # def generate_l_signals(self, symbol, limit=1000, neighbors_count=8):
-    #     ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
-    #     df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    #     df.set_index('timestamp', inplace=True)
-
-    #     df['rsi'] = self.n_rsi(df['close'], 14, 1)
-    #     df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)
-    #     df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-    #     df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
-
-    #     features = df[['rsi', 'adx', 'cci', 'wt']].values
-    #     feature_series = features[-1]
-    #     feature_arrays = features[:-1]
-
-    #     distances = self.lorentzian_distance(feature_series, feature_arrays)
-    #     nearest_indices = distances.argsort()[:neighbors_count]
-
-    #     y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-    #     y_train_series = y_train_series[:-1]
-    #     predictions = y_train_series[nearest_indices]
-    #     prediction = np.sum(predictions)
-
-    #     df['ema'] = EMAIndicator(df['close'], window=200).ema_indicator()
-    #     df['sma'] = SMAIndicator(df['close'], window=200).sma_indicator()
-
-    #     is_ema_uptrend = df['close'] > df['ema']
-    #     is_ema_downtrend = df['close'] < df['ema']
-    #     is_sma_uptrend = df['close'] > df['sma']
-    #     is_sma_downtrend = df['close'] < df['sma']
-
-    #     if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1]:
-    #         return 'long'
-    #     elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1]:
-    #         return 'short'
-    #     else:
-    #         return 'neutral'
-
-    # def normalize(self, series):
-    #     scaler = MinMaxScaler()
-    #     series = series.values.reshape(-1, 1)
-    #     normalized_series = scaler.fit_transform(series).flatten()
-    #     return pd.Series(normalized_series, index=series.index)
-
-    # def rescale(self, series, new_min=0, new_max=1):
-    #     old_min, old_max = series.min(), series.max()
-    #     rescaled_series = new_min + (new_max - new_min) * (series - old_min) / (old_max - old_min)
-    #     return pd.Series(rescaled_series, index=series.index)
-
-    # def n_rsi(self, series, n1, n2):
-    #     rsi = ta.momentum.RSIIndicator(series, window=n1).rsi()
-    #     return self.rescale(rsi.ewm(span=n2, adjust=False).mean())
-
-    # def n_cci(self, high, low, close, n1, n2):
-    #     cci = ta.trend.CCIIndicator(high, low, close, window=n1).cci()
-    #     return self.normalize(cci.ewm(span=n2, adjust=False).mean())
-
-    # def n_wt(self, hlc3, n1=10, n2=11):
-    #     ema1 = ta.trend.EMAIndicator(hlc3, window=n1).ema_indicator()
-    #     ema2 = ta.trend.EMAIndicator(abs(hlc3 - ema1), window=n1).ema_indicator()
-    #     ci = (hlc3 - ema1) / (0.015 * ema2)
-    #     wt1 = ta.trend.EMAIndicator(ci, window=n2).ema_indicator()
-    #     wt2 = ta.trend.SMAIndicator(wt1, window=4).sma_indicator()
-    #     return self.normalize(wt1 - wt2)
-
-    # def n_adx(self, high, low, close, n1):
-    #     adx = ta.trend.ADXIndicator(high, low, close, window=n1).adx()
-    #     return self.rescale(adx)
-
-    # def regime_filter(self, series, high, low, use_regime_filter, threshold):
-    #     if not use_regime_filter:
-    #         return pd.Series([True] * len(series))
-
-    #     def klmf(series, high, low):
-    #         value1 = pd.Series(0, index=series.index)
-    #         value2 = pd.Series(0, index=series.index)
-    #         klmf = pd.Series(0, index=series.index)
-    #         for i in range(1, len(series)):
-    #             value1[i] = 0.2 * (series[i] - series[i - 1]) + 0.8 * value1[i - 1]
-    #             value2[i] = 0.1 * (high[i] - low[i]) + 0.8 * value2[i - 1]
-    #         omega = abs(value1 / value2)
-    #         alpha = (-omega ** 2 + np.sqrt(omega ** 4 + 16 * omega ** 2)) / 8
-    #         for i in range(1, len(series)):
-    #             klmf[i] = alpha[i] * series[i] + (1 - alpha[i]) * klmf[i - 1]
-    #         return klmf
-
-    #     klmf_values = klmf(series, high, low)
-    #     abs_curve_slope = abs(klmf_values.diff())
-    #     exponential_average_abs_curve_slope = ta.trend.EMAIndicator(abs_curve_slope, window=200).ema_indicator()
-    #     normalized_slope_decline = (abs_curve_slope - exponential_average_abs_curve_slope) / exponential_average_abs_curve_slope
-    #     return normalized_slope_decline >= threshold
-
-    # def filter_adx(self, close, high, low, adx_threshold, use_adx_filter, length=14):
-    #     if not use_adx_filter:
-    #         return pd.Series([True] * len(close))
-    #     adx = ta.trend.ADXIndicator(high, low, close, window=length).adx()
-    #     return adx > adx_threshold
-
-    # def filter_volatility(self, high, low, close, use_volatility_filter, min_length=1, max_length=10):
-    #     if not use_volatility_filter:
-    #         return pd.Series([True] * len(close))
-    #     recent_atr = ta.volatility.AverageTrueRange(high, low, close, window=min_length).average_true_range()
-    #     historical_atr = ta.volatility.AverageTrueRange(high, low, close, window=max_length).average_true_range()
-    #     return recent_atr > historical_atr
-
-    # def lorentzian_distance(self, feature_series, feature_arrays):
-    #     distances = np.log(1 + np.abs(feature_series - feature_arrays))
-    #     return distances.sum(axis=1)
-
-    # def generate_l_signals(self, symbol, limit=1000, neighbors_count=8):
-    #     ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
-    #     df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    #     df.set_index('timestamp', inplace=True)
-
-    #     df['rsi'] = self.n_rsi(df['close'], 14, 1)
-    #     df['adx'] = self.n_adx(df['high'], df['low'], df['close'], 14)
-    #     df['cci'] = self.n_cci(df['high'], df['low'], df['close'], 20, 1)
-    #     df['wt'] = self.n_wt((df['high'] + df['low'] + df['close']) / 3, 10, 11)
-
-    #     features = df[['rsi', 'adx', 'cci', 'wt']].values
-    #     feature_series = features[-1]
-    #     feature_arrays = features[:-1]
-
-    #     distances = self.lorentzian_distance(feature_series, feature_arrays)
-    #     nearest_indices = distances.argsort()[:neighbors_count]
-
-    #     y_train_series = np.where(df['close'].shift(-4) > df['close'], 1, -1)
-    #     y_train_series = y_train_series.values[:-1]
-    #     predictions = y_train_series[nearest_indices]
-    #     prediction = np.sum(predictions)
-
-    #     df['ema'] = ta.trend.EMAIndicator(df['close'], window=200).ema_indicator()
-    #     df['sma'] = ta.trend.SMAIndicator(df['close'], window=200).sma_indicator()
-
-    #     is_ema_uptrend = df['close'] > df['ema']
-    #     is_ema_downtrend = df['close'] < df['ema']
-    #     is_sma_uptrend = df['close'] > df['sma']
-    #     is_sma_downtrend = df['close'] < df['sma']
-
-    #     if prediction > 0 and is_ema_uptrend.iloc[-1] and is_sma_uptrend.iloc[-1]:
-    #         return 'long'
-    #     elif prediction < 0 and is_ema_downtrend.iloc[-1] and is_sma_downtrend.iloc[-1]:
-    #         return 'short'
-    #     else:
-    #         return 'neutral'
-
-    def get_l_signal(self, symbol: str, limit: int = 1000, neighbors_count: int = 8) -> str:
-        # Fetch OHLCV data
-        ohlcv_data = self.fetch_ohlcv(symbol=symbol, timeframe='1m', limit=limit)
-        df = pd.DataFrame(ohlcv_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-
-        # Calculate technical indicators
-        df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        df['adx'] = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14).adx()
-        df['cci'] = ta.trend.CCIIndicator(df['high'], df['low'], df['close'], window=20).cci()
-
-        # Normalize indicators
-        def normalize(series):
-            return (series - series.min()) / (series.max() - series.min())
-
-        df['rsi'] = normalize(df['rsi'])
-        df['adx'] = normalize(df['adx'])
-        df['cci'] = normalize(df['cci'])
-
-        # Prepare feature matrix
-        features = df[['rsi', 'adx', 'cci']].values
-        distances = []
-
-        # Calculate Lorentzian distances
-        for i in range(len(features) - 1):
-            dist = np.sum(np.log(1 + np.abs(features[-1] - features[i])))
-            distances.append(dist)
-
-        distances = np.array(distances)
-        nearest_indices = distances.argsort()[:neighbors_count]
-
-        # Determine prediction based on nearest neighbors
-        close_prices = df['close'].values
-        predictions = [1 if close_prices[idx + 4] > close_prices[idx] else -1 for idx in nearest_indices]
-        prediction = np.sum(predictions)
-
-        # Filters (simple EMA and SMA trend filters)
-        ema_period = 200
-        sma_period = 200
-        df['ema'] = df['close'].ewm(span=ema_period, adjust=False).mean()
-        df['sma'] = df['close'].rolling(window=sma_period).mean()
-
-        is_ema_uptrend = df['close'].iloc[-1] > df['ema'].iloc[-1]
-        is_ema_downtrend = df['close'].iloc[-1] < df['ema'].iloc[-1]
-        is_sma_uptrend = df['close'].iloc[-1] > df['sma'].iloc[-1]
-        is_sma_downtrend = df['close'].iloc[-1] < df['sma'].iloc[-1]
-
-        # Generate signals
-        if prediction > 0 and is_ema_uptrend and is_sma_uptrend:
-            return 'long'
-        elif prediction < 0 and is_ema_downtrend and is_sma_downtrend:
-            return 'short'
-        else:
-            return 'neutral'
+            logging.error(f"[{symbol}] Error in generate_l_signals_from_data: {e}")
+            logging.error(traceback.format_exc())
+            return "neutral"
+
+    def detect_market_regime(self, df):
+        """
+        Detect market regime optimized for minute-scale crypto trading.
+        Returns: 'volatile', 'trending', 'ranging', or 'normal'
+        """
+        try:
+            # Volatility metrics
+            atr_pct = df['atr_pct'].iloc[-1]  # Current ATR as percentage
+            recent_volatility = df['atr_pct'].rolling(5).mean().iloc[-1]  # 5-minute average
+            baseline_volatility = df['atr_pct'].rolling(20).mean().iloc[-1]  # 20-minute baseline
+
+            # Momentum and trend metrics
+            price_changes = df['close'].pct_change()
+            recent_momentum = price_changes.rolling(5).sum().iloc[-1]  # 5-minute momentum
+
+            # Trend strength indicators
+            ema_fast = df['close'].ewm(span=8, adjust=False).mean()
+            ema_medium = df['close'].ewm(span=21, adjust=False).mean()
+
+            # Calculate trend consistency
+            price_above_fast = (df['close'] > ema_fast).rolling(10).mean().iloc[-1]
+            fast_above_medium = (ema_fast > ema_medium).rolling(10).mean().iloc[-1]
+
+            # Direction changes (ranging detection)
+            direction_changes = (price_changes.rolling(10)
+                               .apply(lambda x: ((x > 0) != (x.shift(1) > 0)).sum())
+                               .iloc[-1])
+
+            # Log regime detection metrics
+            logging.info(f"""Market Regime Metrics:
+                Current ATR%: {atr_pct:.4f}
+                Recent Volatility (5m): {recent_volatility:.4f}
+                Baseline Volatility (20m): {baseline_volatility:.4f}
+                Recent Momentum: {recent_momentum:.4f}
+                Direction Changes: {direction_changes}
+                Price Above Fast EMA: {price_above_fast:.4f}
+                Fast Above Medium EMA: {fast_above_medium:.4f}
+            """)
+
+            # Detect regime with improved volatility analysis
+            if (recent_volatility > baseline_volatility * 1.5 and atr_pct > recent_volatility) or \
+               abs(recent_momentum) > 0.02:  # Volatile conditions
+                return 'volatile'
+
+            elif (price_above_fast > 0.8 and fast_above_medium > 0.8 and recent_momentum > 0 and \
+                  recent_volatility > baseline_volatility * 0.8) or \
+                 (price_above_fast < 0.2 and fast_above_medium < 0.2 and recent_momentum < 0 and \
+                  recent_volatility > baseline_volatility * 0.8):
+                # Strong trend conditions with sufficient volatility
+                return 'trending'
+
+            elif direction_changes >= 4 and recent_volatility < baseline_volatility * 0.8:
+                # Ranging conditions with lower recent volatility
+                return 'ranging'
+
+            else:
+                return 'normal'
+
+        except Exception as e:
+            logging.error(f"Error in detect_market_regime: {e}")
+            return 'normal'  # Default to normal regime on error
+
+    def calculate_key_levels(self, df):
+        # Simple pivot points
+        pivot = (df['high'].iloc[-1] + df['low'].iloc[-1] + df['close'].iloc[-1]) / 3
+        r1 = 2 * pivot - df['low'].iloc[-1]
+        s1 = 2 * pivot - df['high'].iloc[-1]
+        return s1, pivot, r1
 
     def update_order_history(self, symbol, order_id, timestamp):
         with self.entry_order_ids_lock:
@@ -1181,42 +912,6 @@ class Exchange:
             except Exception as e:
                 logging.info(f"An error occurred while fetching symbols: {e}, retrying in 10 seconds...")
                 time.sleep(10)
-
-    # def _get_symbols(self):
-    #     current_time = time.time()
-    #     if self.symbols_cache and (current_time - self.symbols_cache_time) < self.cache_duration:
-    #         logging.info("Returning cached symbols")
-    #         return self.symbols_cache
-
-    #     while True:
-    #         try:
-    #             #self.exchange.set_sandbox_mode(True)
-    #             markets = self.exchange.load_markets()
-    #             symbols = [market['symbol'] for market in markets.values()]
-    #             self.symbols_cache = symbols
-    #             self.symbols_cache_time = current_time
-    #             logging.info(f"Get symbols accessed")
-    #             return symbols
-    #         except RateLimitExceeded as e:
-    #             logging.info(f"Get symbols Rate limit exceeded: {e}, retrying in 10 seconds...")
-    #             time.sleep(10)
-    #         except Exception as e:
-    #             logging.info(f"An error occurred while fetching symbols: {e}, retrying in 10 seconds...")
-    #             time.sleep(10)
-
-    # def _get_symbols(self):
-    #     while True:
-    #         try:
-    #             #self.exchange.set_sandbox_mode(True)
-    #             markets = self.exchange.load_markets()
-    #             symbols = [market['symbol'] for market in markets.values()]
-    #             return symbols
-    #         except ccxt.errors.RateLimitExceeded as e:
-    #             logging.info(f"Get symbols Rate limit exceeded: {e}, retrying in 10 seconds...")
-    #             time.sleep(10)
-    #         except Exception as e:
-    #             logging.info(f"An error occurred while fetching symbols: {e}, retrying in 10 seconds...")
-    #             time.sleep(10)
 
     def get_ohlc_data(self, symbol, timeframe='1H', since=None, limit=None):
         """
@@ -1443,126 +1138,6 @@ class Exchange:
 
         return df
 
-    # def fetch_ohlcv(self, symbol, timeframe='1d', limit=None, max_retries=100, base_delay=10, max_delay=60):
-    #     """
-    #     Fetch OHLCV data for the given symbol and timeframe.
-
-    #     :param symbol: Trading symbol.
-    #     :param timeframe: Timeframe string.
-    #     :param limit: Limit the number of returned data points.
-    #     :param max_retries: Maximum number of retries for API calls.
-    #     :param base_delay: Base delay for exponential backoff.
-    #     :param max_delay: Maximum delay for exponential backoff.
-    #     :return: DataFrame with OHLCV data or an empty DataFrame on error.
-    #     """
-    #     retries = 0
-
-    #     while retries < max_retries:
-    #         try:
-    #             with self.rate_limiter:
-    #                 # Fetch the OHLCV data from the exchange
-    #                 ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)  # Pass the limit parameter
-
-    #                 # Create a DataFrame from the OHLCV data
-    #                 df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-
-    #                 # Convert the timestamp to datetime
-    #                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-    #                 # Set the timestamp as the index
-    #                 df.set_index('timestamp', inplace=True)
-
-    #                 return df
-
-    #         except ccxt.RateLimitExceeded as e:
-    #             retries += 1
-    #             delay = min(base_delay * (2 ** retries) + random.uniform(0, 0.1 * (2 ** retries)), max_delay)
-    #             logging.info(f"Rate limit exceeded: {e}. Retrying in {delay:.2f} seconds...")
-    #             time.sleep(delay)
-
-    #         except ccxt.BadSymbol as e:
-    #             # Handle the BadSymbol error gracefully and exit the loop
-    #             logging.info(f"Bad symbol: {symbol}. Error: {e}")
-    #             break  # Exit the retry loop as the symbol is invalid
-
-    #         except ccxt.BaseError as e:
-    #             # Log the error message
-    #             logging.info(f"Failed to fetch OHLCV data: {self.exchange.id} {e}")
-    #             logging.error(traceback.format_exc())
-    #             return pd.DataFrame()  # Return empty DataFrame for other base errors
-
-    #         except Exception as e:
-    #             # Log the error message and traceback
-    #             logging.info(f"Unexpected error occurred while fetching OHLCV data: {e}")
-    #             logging.error(traceback.format_exc())
-
-    #             # Handle specific error scenarios
-    #             if isinstance(e, TypeError) and 'string indices must be integers' in str(e):
-    #                 logging.info(f"TypeError occurred: {e}")
-    #                 logging.info(f"Response content: {self.exchange.last_http_response}")
-
-    #                 try:
-    #                     response = json.loads(self.exchange.last_http_response)
-    #                     logging.info(f"Parsed response into a dictionary: {response}")
-    #                 except json.JSONDecodeError as json_error:
-    #                     logging.info(f"Failed to parse response: {json_error}")
-
-    #             return pd.DataFrame()  # Return empty DataFrame on unexpected errors
-
-    #     logging.error(f"Failed to fetch OHLCV data after {max_retries} retries.")
-    #     return pd.DataFrame()
-
-    # def fetch_ohlcv(self, symbol, timeframe='1d', limit=None):
-    #     """
-    #     Fetch OHLCV data for the given symbol and timeframe.
-
-    #     :param symbol: Trading symbol.
-    #     :param timeframe: Timeframe string.
-    #     :param limit: Limit the number of returned data points.
-    #     :return: DataFrame with OHLCV data.
-    #     """
-    #     try:
-    #         # Fetch the OHLCV data from the exchange
-    #         ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)  # Pass the limit parameter
-
-    #         # Create a DataFrame from the OHLCV data
-    #         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-
-    #         # Convert the timestamp to datetime
-    #         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-    #         # Set the timestamp as the index
-    #         df.set_index('timestamp', inplace=True)
-
-    #         return df
-
-    #     except ccxt.BaseError as e:
-    #         # Log the error message
-    #         logging.error(f"Failed to fetch OHLCV data: {self.exchange.id} {e}")
-
-    #         # Log the traceback for further debugging
-    #         logging.error(traceback.format_exc())
-
-    #         # Return an empty DataFrame in case of an error
-    #         return pd.DataFrame()
-
-    #     except Exception as e:
-    #         # Check if the error is related to response parsing
-    #         if 'response' in locals() and isinstance(response, str):
-    #             logging.info(f"Response is a string: {response}")
-    #             try:
-    #                 # Attempt to parse the response
-    #                 response = json.loads(response)
-    #                 logging.info("Parsed response into a dictionary")
-    #             except json.JSONDecodeError as json_error:
-    #                 logging.error(f"Failed to parse response: {json_error}")
-
-    #         # Log any other unexpected errors
-    #         logging.info(f"Unexpected error occurred while fetching OHLCV data: {e}")
-    #         logging.info(traceback.format_exc())
-
-    #         return pd.DataFrame()
-
     def get_orderbook(self, symbol, max_retries=3, retry_delay=5) -> dict:
         values = {"bids": [], "asks": []}
 
@@ -1690,16 +1265,6 @@ class Exchange:
             logging.info(traceback.format_exc())
             return None
 
-    # Universal
-    # def get_current_price(self, symbol: str) -> float:
-    #     try:
-    #         ticker = self.exchange.fetch_ticker(symbol)
-    #         if "bid" in ticker and "ask" in ticker:
-    #             return (ticker["bid"] + ticker["ask"]) / 2
-    #     except Exception as e:
-    #         logging.error(f"An error occurred in get_current_price() for {symbol}: {e}")
-    #         return None
-
     # Binance
     def get_current_price_binance(self, symbol: str) -> float:
         current_price = 0.0
@@ -1713,21 +1278,6 @@ class Exchange:
             logging.info(f"An unknown error occurred in get_current_price_binance(): {e}")
         return current_price
 
-    # def get_leverage_tiers_binance(self, symbols: Optional[List[str]] = None):
-    #     try:
-    #         tiers = self.exchange.fetch_leverage_tiers(symbols)
-    #         for symbol, brackets in tiers.items():
-    #             print(f"\nSymbol: {symbol}")
-    #             for bracket in brackets:
-    #                 print(f"Bracket ID: {bracket['bracket']}")
-    #                 print(f"Initial Leverage: {bracket['initialLeverage']}")
-    #                 print(f"Notional Cap: {bracket['notionalCap']}")
-    #                 print(f"Notional Floor: {bracket['notionalFloor']}")
-    #                 print(f"Maintenance Margin Ratio: {bracket['maintMarginRatio']}")
-    #                 print(f"Cumulative: {bracket['cum']}")
-    #     except Exception as e:
-    #         logging.error(f"An error occurred while fetching leverage tiers: {e}")
-
     def get_symbol_info_binance(self, symbol):
         try:
             markets = self.exchange.fetch_markets()
@@ -1740,15 +1290,6 @@ class Exchange:
                     return min_notional, min_qty
         except Exception as e:
             logging.error(f"An error occurred while fetching symbol info: {e}")
-
-    # def get_market_data_binance(self, symbol):
-    #     market_data = self.exchange.load_markets(reload=True)  # Force a reload to get fresh data
-    #     return market_data[symbol]
-
-    # def get_market_data_binance(self, symbol):
-    #     market_data = self.exchange.load_markets(reload=True)  # Force a reload to get fresh data
-    #     print("Symbols:", market_data.keys())  # Print out all available symbols
-    #     return market_data[symbol]
 
     def get_min_lot_size_binance(self, symbol):
         market_data = self.get_market_data_binance(symbol)
@@ -2051,7 +1592,7 @@ class Exchange:
                 raise ValueError(f"Invalid side: {side}")
 
             params = {"reduceOnly": reduce_only}
-            return self.exchange.create_order(symbol, order_type, side, amount, price, params)
+            return self.exchange.create_order(symbol, order_type, side, amount, price, params=params)
         else:
             raise ValueError(f"Unsupported order type: {order_type}")
 
