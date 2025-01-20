@@ -376,11 +376,11 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 )
 
             # Update previous quantities for the next iteration
-            if self.running_long:
-                self.previous_long_pos_qty = long_pos_qty
+            # if self.running_long:
+            self.previous_long_pos_qty = long_pos_qty
 
-            if self.running_short:
-                self.previous_short_pos_qty = short_pos_qty
+            # if self.running_short:
+            self.previous_short_pos_qty = short_pos_qty
 
             if not self.running_long and not self.running_short:
                 logging.info(
