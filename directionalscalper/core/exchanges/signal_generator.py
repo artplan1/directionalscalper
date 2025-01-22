@@ -134,9 +134,12 @@ class SignalGenerator:
                 nearest_neighbors = target[np.argsort(distances)[:neighbors_count]]
                 prediction = np.sum(nearest_neighbors)
 
+                # Cap prediction to prevent extreme values
+                prediction = max(min(prediction, neighbors_count/2), -neighbors_count/2)
+
                 signal_data.update({
                     "Prediction": prediction,
-                    "Max_Prediction": neighbors_count
+                    "Max_Prediction": neighbors_count/2  # Adjusted max prediction to match cap
                 })
 
             # Base weights for minute-scale crypto scalping
