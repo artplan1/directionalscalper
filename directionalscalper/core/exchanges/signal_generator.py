@@ -128,19 +128,46 @@ class SignalGenerator:
             # Calculate prediction if using nearest neighbor analysis
             if neighbors_count > 0:
                 features = df_1m[['rsi', 'adx', 'cci', 'wt']].values
-                target = np.where(df_1m['close'].shift(-4) > df_1m['close'], 1, -1)[:-1]
                 feature_series = features[-1]
-                distances = np.linalg.norm(features[:-1] - feature_series, axis=1)
-                nearest_neighbors = target[np.argsort(distances)[:neighbors_count]]
-                raw_prediction = np.sum(nearest_neighbors)
+                feature_arrays = features[:-1]  # All except last point
 
-                # Cap prediction to [-1, 1] range
-                prediction = raw_prediction / neighbors_count  # Normalize to [-1, 1]
-                prediction = max(min(prediction, 1.0), -1.0)  # Ensure bounds
+                # Calculate Lorentzian distances and predictions
+                y_train_series = np.where(df_1m['close'].shift(-4) > df_1m['close'], 1, -1)[:-1]
+
+                predictions = []
+                distances = []
+                lastDistance = -1
+
+                # Improved sampling and distance calculation
+                for i in range(len(feature_arrays)):
+                    if i % 4 == 0:  # Sample every 4th point for noise reduction
+                        # Lorentzian distance with feature scaling
+                        diff = feature_series - feature_arrays[i]
+                        scaled_diff = diff / (np.abs(diff).mean() + 1e-10)  # Prevent division by zero
+                        d = np.log(1 + np.abs(scaled_diff)).sum()
+
+                        if d >= lastDistance:
+                            lastDistance = d
+                            distances.append(d)
+                            predictions.append(y_train_series[i])
+
+                            if len(predictions) > neighbors_count:
+                                # Dynamic threshold at 75th percentile
+                                lastDistance = distances[int(neighbors_count * 3 / 4)]
+                                distances.pop(0)
+                                predictions.pop(0)
+
+                # Calculate weighted prediction based on distances
+                if len(predictions) > 0:
+                    weights = 1 / (np.array(distances) + 1e-10)  # Distance-based weights
+                    weights = weights / weights.sum()  # Normalize weights
+                    prediction = np.sum(predictions * weights)  # Simple weighted average
+                else:
+                    prediction = 0  # Neutral if no predictions
 
                 signal_data.update({
                     "Prediction": prediction,
-                    "Max_Prediction": 1.0  # Since prediction is now normalized to [-1, 1]
+                    "Max_Prediction": 1.0  # Since prediction is naturally in [-1, 1]
                 })
 
             # Base weights for minute-scale crypto scalping
