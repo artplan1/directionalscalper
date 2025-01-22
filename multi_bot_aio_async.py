@@ -200,7 +200,7 @@ class SingleBot:
                         symbol for symbol in self.rotator_symbols_cache['symbols']
                         if symbol not in trading_symbols
                     ]
-                    new_symbols = set(new_symbols[:self.exchange_config.symbols_allowed - len(trading_symbols)])
+                    # new_symbols = set(new_symbols[:self.exchange_config.symbols_allowed - len(trading_symbols)])
 
                     if new_symbols:
                         logging.info(f"Adding new symbols: {new_symbols}")
@@ -290,6 +290,15 @@ class SingleBot:
         try:
             bybit_symbol_by_trades = trades[0]['symbol']
             symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
+
+            if symbol not in self.open_position_symbols and len(self.open_position_symbols) >= self.exchange_config.symbols_allowed:
+                logging.info(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
+                return
+
+            # if both runners are running, no need to process trades
+            if (symbol in self.long_threads and not self.long_threads[symbol].done()) and (symbol in self.short_threads and not self.short_threads[symbol].done()):
+                logging.info(f"[{symbol}] Both runners are running. Skipping trades.")
+                return
 
             # Process 1m data
             ohlcvc_by_trades = self.ws_exchange.build_ohlcvc(trades, "1m")
