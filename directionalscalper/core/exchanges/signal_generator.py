@@ -123,6 +123,7 @@ class SignalGenerator:
                 'EMA_Fast': df_3m['ema_fast'].iloc[-1],
                 'EMA_Medium': df_3m['ema_medium'].iloc[-1],
                 'ATR': df_1m['atr'].iloc[-1],
+                'MACD_Range': df_3m['macd'].abs().max()  # Add MACD range
             }
 
             # Calculate prediction if using nearest neighbor analysis
@@ -180,7 +181,6 @@ class SignalGenerator:
             }
 
             # Get market regime and volatility metrics
-            # market_regime = self.detect_market_regime(df_1m)
             current_volatility = df_1m['atr_pct'].iloc[-1]
             price_momentum = df_1m['close'].pct_change(3).iloc[-1]  # 3-minute momentum
 
@@ -242,6 +242,9 @@ class SignalGenerator:
                 weights["MACD"] *= 1.3
                 weights["EMA_Fast"] *= 1.2
                 weights["EMA_Medium"] *= 0.7
+
+            # Apply prediction weight adjustments for optimal conditions
+            weights = self._adjust_prediction_weights(df_1m, df_3m, weights)
 
             # Normalize weights to sum to 1
             total_weight = sum(weights.values())
@@ -541,34 +544,50 @@ class SignalGenerator:
         try:
             # 1. Price Momentum Component
             price_momentum = (data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"]
+            price_momentum = max(min(price_momentum, 1), -1)  # Bound between -1 and 1
 
             # 2. MACD Component
-            macd_signal = (data["MACD"] - data["MACD_Signal"]) / abs(data["MACD_Signal"])
+            macd_diff = data["MACD"] - data["MACD_Signal"]
+            # Use MACD range for normalization, using half range for better sensitivity
+            macd_range = data["MACD_Range"]
+            if macd_range > 0:
+                macd_signal = macd_diff / (macd_range * 0.5)  # Use half range for stronger signals
+            else:
+                macd_signal = 0
             macd_signal = max(min(macd_signal, 1), -1)  # Bound between -1 and 1
+
+            # Log MACD details for analysis
+            logging.info(f"[{symbol}] MACD Details - Diff: {macd_diff:.6f}, Range: {macd_range:.6f}, Signal: {macd_signal:.3f}")
 
             # 3. EMA Trend Component
             if data["Close"] > data["EMA_Fast"] > data["EMA_Medium"]:
-                ema_trend = min((data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"], 1)
+                ema_diff = data["Close"] - data["EMA_Fast"]
+                ema_trend = min(ema_diff / (data["ATR"] * 2), 1)  # Scale by 2 ATR
             elif data["Close"] < data["EMA_Fast"] < data["EMA_Medium"]:
-                ema_trend = max((data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"], -1)
+                ema_diff = data["Close"] - data["EMA_Fast"]
+                ema_trend = max(ema_diff / (data["ATR"] * 2), -1)  # Scale by 2 ATR
             else:
-                ema_trend = (data["Close"] - data["EMA_Medium"]) / data["EMA_Medium"]
+                ema_diff = data["Close"] - data["EMA_Medium"]
+                ema_trend = ema_diff / (data["ATR"] * 2)  # Scale by 2 ATR
+            ema_trend = max(min(ema_trend, 1), -1)  # Ensure bounds
 
-            # 4. Volatility Component
-            volatility_signal = min(data["ATR"] / data["Close"], 0.1)
+            # 4. Volatility Component (normalized to positive range [0, 0.3])
+            volatility_signal = min(data["ATR"] / data["Close"] * 3, 0.3)  # Increased range and sensitivity
 
-            # 5. Calculate weighted signal
+            # 5. Normalize prediction if available
+            prediction = 0
+            if "Prediction" in data:
+                prediction = data["Prediction"]  # Already in [-1, 1] range
+                logging.info(f"[{symbol}] Prediction: {prediction:.3f}")
+
+            # 6. Calculate weighted signal
             weighted_signal = (
                 price_momentum * weights["EMA_Fast"] +
                 macd_signal * weights["MACD"] +
                 ema_trend * weights["EMA_Medium"] +
-                volatility_signal * weights["ATR"]
+                volatility_signal * weights["ATR"] +
+                prediction * weights["Prediction"]
             )
-
-            # 6. Add prediction if available
-            if "Prediction" in data and "Max_Prediction" in data and data["Max_Prediction"] != 0:
-                prediction = (data["Prediction"] / data["Max_Prediction"]) * 2 - 1
-                weighted_signal += prediction * weights["Prediction"]
 
             # 7. Bound final signal
             final_signal = max(min(weighted_signal, 1.0), -1.0)
@@ -589,4 +608,54 @@ class SignalGenerator:
             logging.error(f"[{symbol}] Error in calculate_weighted_signal: {e}")
             return 0.0
 
+    def _is_emas_packed(self, df_3m, threshold=0.0015):
+        """Check if EMAs are tightly packed within threshold."""
+        latest = df_3m.iloc[-1]
+        ema_values = [
+            latest['ema_fast'],
+            latest['ema_medium'],
+            latest['ema_slow']
+        ]
+        max_diff = max(ema_values) - min(ema_values)
+        return (max_diff / latest['close']) < threshold
+
+    def _check_low_volatility(self, df_1m, atr_threshold=0.005):
+        """Check if volatility is below threshold."""
+        return df_1m['atr_pct'].iloc[-1] < atr_threshold
+
+    def _adjust_prediction_weights(self, df_1m, df_3m, weights):
+        """
+        Adjust weights based on market conditions.
+        For Lorentzian predictions (already in [-1, 1]), we use more conservative adjustments.
+        """
+        adjusted_weights = weights.copy()
+
+        if self._check_low_volatility(df_1m) and self._is_emas_packed(df_3m):
+            volatility_factor = 1 - (df_1m['atr_pct'].iloc[-1] / 0.005)
+
+            # Calculate EMA pack factor
+            latest = df_3m.iloc[-1]
+            ema_values = [latest['ema_fast'], latest['ema_medium'], latest['ema_slow']]
+            max_diff = max(ema_values) - min(ema_values)
+            ema_pack_factor = 1 - (max_diff / latest['close'] / 0.0015)
+
+            # More conservative increase (up to 25% more instead of 50%)
+            increase = min(volatility_factor, ema_pack_factor) * 0.25
+
+            # Adjust weights
+            extra_weight = adjusted_weights["Prediction"] * increase
+            adjusted_weights["Prediction"] *= (1 + increase)
+
+            # Reduce other weights proportionally
+            reduction_per_weight = extra_weight / (len(adjusted_weights) - 1)
+            for key in adjusted_weights:
+                if key != "Prediction":
+                    adjusted_weights[key] -= reduction_per_weight
+
+            logging.info(f"Adjusted weights due to optimal conditions:")
+            logging.info(f"Volatility factor: {volatility_factor:.3f}")
+            logging.info(f"EMA pack factor: {ema_pack_factor:.3f}")
+            logging.info(f"Weight increase: {increase:.3f}")
+
+        return adjusted_weights
 
