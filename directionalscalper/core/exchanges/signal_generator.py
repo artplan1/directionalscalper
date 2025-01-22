@@ -132,14 +132,15 @@ class SignalGenerator:
                 feature_series = features[-1]
                 distances = np.linalg.norm(features[:-1] - feature_series, axis=1)
                 nearest_neighbors = target[np.argsort(distances)[:neighbors_count]]
-                prediction = np.sum(nearest_neighbors)
+                raw_prediction = np.sum(nearest_neighbors)
 
-                # Cap prediction to prevent extreme values
-                prediction = max(min(prediction, neighbors_count/2), -neighbors_count/2)
+                # Cap prediction to [-1, 1] range
+                prediction = raw_prediction / neighbors_count  # Normalize to [-1, 1]
+                prediction = max(min(prediction, 1.0), -1.0)  # Ensure bounds
 
                 signal_data.update({
                     "Prediction": prediction,
-                    "Max_Prediction": neighbors_count/2  # Adjusted max prediction to match cap
+                    "Max_Prediction": 1.0  # Since prediction is now normalized to [-1, 1]
                 })
 
             # Base weights for minute-scale crypto scalping
