@@ -141,11 +141,11 @@ class SignalGenerator:
 
             # Base weights for minute-scale crypto scalping
             base_weights = {
-                "MACD": 0.40,      # Primary momentum indicator
-                "EMA_Fast": 0.25,  # Quick trend confirmation
-                "EMA_Medium": 0.15,# Baseline trend
-                "ATR": 0.15,       # Volatility component
-                "Prediction": 0.05 # Minor ML influence
+                "MACD": 0.35,      # Reduced trend dependency
+                "EMA_Fast": 0.20,  # Less trend weight
+                "EMA_Medium": 0.10,# Minimal baseline trend
+                "ATR": 0.25,       # Increased volatility weight
+                "Prediction": 0.10 # Increased ML influence
             }
 
             # Get market regime and volatility metrics
@@ -229,9 +229,9 @@ class SignalGenerator:
             logging.info(f"[{symbol}] Weighted Signal: {weighted_signal:.3f}")
 
             # More aggressive thresholds for minute-scale trading
-            if weighted_signal > 0.25:    # Reduced threshold for faster entries
+            if weighted_signal > 0.15:    # Reduced threshold for faster entries
                 new_signal= "long"
-            elif weighted_signal < -0.25:  # Reduced threshold for faster entries
+            elif weighted_signal < -0.15:  # Reduced threshold for faster entries
                 new_signal= "short"
             else:
                 new_signal= "neutral"
@@ -243,11 +243,11 @@ class SignalGenerator:
                 time_since_last = current_time - self.exchange.last_signal_time[symbol]
 
                 # Determine buffer time based on regime
-                buffer_time = 15  # Base buffer time
+                buffer_time = 8  # Base buffer time
                 if market_regime == "volatile":
-                    buffer_time = 10  # Shorter buffer in volatile markets
+                    buffer_time = 5  # Shorter buffer in volatile markets
                 elif market_regime == "trending":
-                    buffer_time = 20  # Longer buffer in trending markets
+                    buffer_time = 12  # Longer buffer in trending markets
 
                 if new_signal != 'neutral':  # Only buffer non-neutral signals
                     if new_signal == last_signal:  # Same signal
@@ -321,8 +321,8 @@ class SignalGenerator:
             df['ema_slow'].iloc[-1],
         )
         macd, macd_signal = df['macd'].iloc[-1], df['macd_signal'].iloc[-1]
-        is_uptrend = close > ema_fast > ema_medium > ema_slow and macd > macd_signal
-        is_downtrend = close < ema_fast < ema_medium < ema_slow and macd < macd_signal
+        is_uptrend = (close > ema_fast and ema_fast > ema_medium) or (macd > macd_signal)
+        is_downtrend = (close < ema_fast and ema_fast < ema_medium) or (macd < macd_signal)
         return is_uptrend, is_downtrend
 
     def _detect_market_regime(self, df: pd.DataFrame, symbol: str) -> str:
@@ -365,8 +365,8 @@ class SignalGenerator:
             """)
 
             # Detect regime with improved volatility analysis
-            if (recent_volatility > baseline_volatility * 1.5 and atr_pct > recent_volatility) or \
-               abs(recent_momentum) > 0.02:  # Volatile conditions
+            if (recent_volatility > baseline_volatility * 1.2 and atr_pct > recent_volatility) or \
+               abs(recent_momentum) > 0.015:  # More sensitive volatile conditions
                 return 'volatile'
 
             elif (price_above_fast > 0.8 and fast_above_medium > 0.8 and recent_momentum > 0 and \
