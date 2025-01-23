@@ -295,9 +295,14 @@ class SingleBot:
             bybit_symbol_by_trades = trades[0]['symbol']
             symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
 
-            if symbol not in self.open_position_symbols and len(self.open_position_symbols) >= self.exchange_config.symbols_allowed:
-                logging.debug(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
-                return
+            if symbol not in self.open_position_symbols:
+                if self.config_auto_graceful_stop:
+                    logging.info(f"Symbol {symbol} not in open position symbols and auto graceful stop is enabled. Skipping trades.")
+                    return
+
+                if len(self.open_position_symbols) >= self.exchange_config.symbols_allowed:
+                    logging.debug(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
+                    return
 
             # if both runners are running, no need to process trades
             if (symbol in self.long_threads and not self.long_threads[symbol].done()) and (symbol in self.short_threads and not self.short_threads[symbol].done()):
@@ -346,7 +351,7 @@ class SingleBot:
                 )
                 self._process_signal(symbol=symbol, signal=signal)
             else:
-                logging.error(f"Missing data for symbol {symbol} in one of the timeframes")
+                logging.warning(f"Missing data for symbol {symbol} in one of the timeframes")
 
         except Exception as e:
             logging.warning(f"Error processing trades: {e}")
@@ -720,7 +725,7 @@ class SingleBot:
                 )
                 return False
         else:
-            logging.error(f"Invalid action {action} for symbol {symbol}")
+            logging.warning(f"Invalid action {action} for symbol {symbol}")
             return False
 
         # Create an asyncio task for the strategy

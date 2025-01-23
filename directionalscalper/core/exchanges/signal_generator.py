@@ -115,6 +115,12 @@ class SignalGenerator:
             latest_atr_pct = df_1m['atr_pct'].iloc[-1]
             logging.info(f"[{symbol}] ATR %: {latest_atr_pct:.4f}")
 
+            # Calculate trend quality once
+            trend_quality = self._calculate_trend_quality(df_3m, df_1m)
+
+            logging.info(f"[{symbol}] EMA Separations - Fast-Med: {abs(df_3m['ema_fast'].iloc[-1] - df_3m['ema_medium'].iloc[-1]) / df_3m['close'].iloc[-1]:.6f}, Med-Slow: {abs(df_3m['ema_medium'].iloc[-1] - df_3m['ema_slow'].iloc[-1]) / df_3m['close'].iloc[-1]:.6f}")
+            logging.info(f"[{symbol}] Trend Quality: {trend_quality:.3f}")
+
             # Prepare data for weighted signal calculation
             signal_data = {
                 "Close": df_3m['close'].iloc[-1],
@@ -124,7 +130,8 @@ class SignalGenerator:
                 'EMA_Medium': df_3m['ema_medium'].iloc[-1],
                 'EMA_Slow': df_3m['ema_slow'].iloc[-1],
                 'ATR': df_1m['atr'].iloc[-1],
-                'MACD_Range': df_3m['macd'].abs().max()  # Add MACD range
+                'MACD_Range': df_3m['macd'].abs().max(),  # Add MACD range
+                'trend_quality': trend_quality  # Add trend quality to signal data
             }
 
             # Calculate prediction if using nearest neighbor analysis
@@ -199,12 +206,51 @@ class SignalGenerator:
             logging.info(f"[{symbol}] Weighted Signal: {weighted_signal:.3f}")
 
             # More aggressive thresholds for minute-scale trading
-            if weighted_signal > 0.15:    # Reduced threshold for faster entries
-                new_signal= "long"
-            elif weighted_signal < -0.15:  # Reduced threshold for faster entries
-                new_signal= "short"
+            base_threshold = 0.12  # Reduced from 0.15 for faster response
+
+            # Get recent momentum for threshold adjustment
+            recent_momentum = abs(df_1m['close'].pct_change(3).iloc[-1])
+
+            # Dynamic threshold adjustment
+            if market_regime == "volatile":
+                threshold = base_threshold * 1.2  # More conservative in volatile markets
+            elif market_regime == "trending":
+                # In trending markets, adjust based on trend alignment
+                if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
+                    threshold = base_threshold * 0.85  # More aggressive when aligned with trend
+                else:
+                    threshold = base_threshold * 1.1  # More conservative when against trend
+            elif market_regime == "ranging":
+                threshold = base_threshold * 0.9  # More aggressive in ranging markets
+            else:  # normal regime
+                if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
+                    threshold = base_threshold * 0.85  # Still aggressive for strong trend even in normal regime
+                elif current_volatility < 0.2:  # Low volatility environment
+                    threshold = base_threshold * 0.9
+                    if recent_momentum > 0.003:  # Strong momentum in low vol
+                        threshold *= 0.9  # Even more aggressive
+                elif current_volatility > 0.8:  # High volatility environment
+                    threshold = base_threshold * 1.1
+                else:
+                    threshold = base_threshold
+
+            logging.info(f"""[{symbol}] Threshold Analysis:
+                [{symbol}] Base Threshold: {base_threshold:.3f}
+                [{symbol}] Market Regime: {market_regime}
+                [{symbol}] Current Volatility: {current_volatility:.4f}
+                [{symbol}] Recent Momentum: {recent_momentum:.4f}
+                [{symbol}] Final Threshold: {threshold:.3f}
+                [{symbol}] Weighted Signal: {weighted_signal:.3f}
+            """)
+
+            if weighted_signal > threshold:
+                new_signal = "long"
+            elif weighted_signal < -threshold:
+                new_signal = "short"
             else:
-                new_signal= "neutral"
+                new_signal = "neutral"
+
+            logging.info(f"[{symbol}] New Signal: {new_signal}")
 
             # Signal buffer logic with proper buffering
             current_time = time.time()
@@ -212,12 +258,48 @@ class SignalGenerator:
                 last_signal = self.exchange.last_signal[symbol]
                 time_since_last = current_time - self.exchange.last_signal_time[symbol]
 
-                # Determine buffer time based on regime
+                # Determine buffer time based on regime and signal strength
                 buffer_time = 8  # Base buffer time
                 if market_regime == "volatile":
-                    buffer_time = 5  # Shorter buffer in volatile markets
+                    buffer_time = 12  # Longer buffer to protect against whipsaws
                 elif market_regime == "trending":
-                    buffer_time = 12  # Longer buffer in trending markets
+                    # Check for strong trend alignment
+                    if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
+                        # Dynamic buffer based on trend quality and signal strength
+                        quality_factor = trend_quality * (0.8 + min(0.4, abs(weighted_signal)))
+                        buffer_time = 6 + (quality_factor * 8)  # Range: 6-14s based on quality
+                    else:
+                        buffer_time = 6  # Shorter buffer when trend is uncertain
+                elif market_regime == "ranging":
+                    buffer_time = 4  # Shortest buffer to catch reversals quickly
+
+                # Adjust buffer time based on signal strength with more granular thresholds
+                signal_strength = abs(weighted_signal)
+                if signal_strength > 0.25:  # Very strong signal
+                    buffer_time *= 1.3
+                elif signal_strength > 0.20:  # Strong signal
+                    buffer_time *= 1.2
+                elif signal_strength > 0.15:  # Moderate signal
+                    buffer_time *= 1.1
+                elif signal_strength < 0.10:  # Weak signal
+                    buffer_time *= 0.9
+
+                # Additional adjustments based on trend quality changes
+                if trend_quality < 0.3:  # Weak trend quality
+                    buffer_time *= 0.8  # Reduce buffer time
+                elif trend_quality > 0.7:  # Strong trend quality
+                    buffer_time *= 1.2  # Increase buffer time
+
+                # Cap maximum buffer time
+                buffer_time = min(buffer_time, 15)  # Maximum 15 seconds
+
+                logging.info(f"""[{symbol}] Buffer Analysis:
+                    [{symbol}] Base Buffer: 8.0s
+                    [{symbol}] Market Regime: {market_regime}
+                    [{symbol}] Trend Quality: {trend_quality:.3f}
+                    [{symbol}] Signal Strength: {signal_strength:.3f}
+                    [{symbol}] Final Buffer: {buffer_time:.1f}s
+                """)
 
                 if new_signal != 'neutral':  # Only buffer non-neutral signals
                     if new_signal == last_signal:  # Same signal
@@ -359,16 +441,16 @@ class SignalGenerator:
 
             # Log all metrics for analysis
             logging.info(f"""[{symbol}] Regime Detection Metrics (1m):
-                Current ATR%: {atr_pct:.4f}
-                Recent Volatility (10m): {recent_volatility:.4f}
-                Baseline Volatility (30m): {baseline_volatility:.4f}
-                Volatility Ratio: {vol_ratio:.4f}
-                Short Momentum (3m): {short_momentum:.4f}
-                Medium Momentum (10m): {medium_momentum:.4f}
-                Trend Alignment: {trend_alignment}
-                Direction Changes (8m): {direction_changes}
-                Close: {close:.6f}
-                EMAs - Fast: {ema_fast:.6f}, Medium: {ema_medium:.6f}, Slow: {ema_slow:.6f}
+                [{symbol}] Current ATR%: {atr_pct:.4f}
+                [{symbol}] Recent Volatility (10m): {recent_volatility:.4f}
+                [{symbol}] Baseline Volatility (30m): {baseline_volatility:.4f}
+                [{symbol}] Volatility Ratio: {vol_ratio:.4f}
+                [{symbol}] Short Momentum (3m): {short_momentum:.4f}
+                [{symbol}] Medium Momentum (10m): {medium_momentum:.4f}
+                [{symbol}] Trend Alignment: {trend_alignment}
+                [{symbol}] Direction Changes (8m): {direction_changes}
+                [{symbol}] Close: {close:.6f}
+                [{symbol}] EMAs - Fast: {ema_fast:.6f}, Medium: {ema_medium:.6f}, Slow: {ema_slow:.6f}
             """)
 
             # Regime detection with noise filtering
@@ -378,11 +460,10 @@ class SignalGenerator:
                 abs(medium_momentum) > 0.02):   # Sustained moves
                 return 'volatile'
 
-            # 2. Trending: Clear trend alignment with consistent momentum
-            elif (trend_alignment != 0 and  # Clear direction
-                  abs(medium_momentum) > 0.005 and  # Minimal sustained momentum
-                  vol_ratio > 0.8 and  # Sufficient volatility
-                  direction_changes <= 2):  # Few direction changes
+            # 2. Trending: Modified to better catch strong trends
+            elif ((trend_alignment != 0 and abs(medium_momentum) > 0.005) or  # Original trend condition
+                  (close < ema_fast < ema_medium < ema_slow) or  # Strong bearish alignment
+                  (close > ema_fast > ema_medium > ema_slow)):   # Strong bullish alignment
                 return 'trending'
 
             # 3. Ranging: Low momentum with regular direction changes
@@ -565,6 +646,9 @@ class SignalGenerator:
         Returns a value between -1 (strong sell) and 1 (strong buy).
         """
         try:
+            # Get trend quality from signal data
+            trend_quality = data['trend_quality']
+
             # 1. Price Momentum Component
             price_momentum = (data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"]
             price_momentum = max(min(price_momentum, 1), -1)  # Bound between -1 and 1
@@ -597,36 +681,6 @@ class SignalGenerator:
                 ema_diff = data["Close"] - data["EMA_Medium"]
                 ema_trend = ema_diff / (data["ATR"] * 2)  # Scale by 2 ATR
             ema_trend = max(min(ema_trend, 1), -1)  # Ensure bounds
-
-            # Check for meaningful EMA separation before considering perfect/strong trends
-            ema_fast_med_sep = abs(data["EMA_Fast"] - data["EMA_Medium"]) / data["Close"]
-            ema_med_slow_sep = abs(data["EMA_Medium"] - data["EMA_Slow"]) / data["Close"]
-            min_separation = 0.003  # Minimum 0.3% separation
-
-            # Calculate trend quality based on separation and volatility
-            # Require both separations to be above threshold
-            trend_quality = min(1.0, min(ema_fast_med_sep, ema_med_slow_sep) / min_separation)
-
-            # Additional reduction if separations are very different
-            separation_ratio = min(ema_fast_med_sep, ema_med_slow_sep) / max(ema_fast_med_sep, ema_med_slow_sep)
-            trend_quality *= separation_ratio  # Reduce quality if separations are uneven
-
-            # Scale trend quality by volatility for low volatility environments
-            if data["ATR"] / data["Close"] < 0.003:  # Less than 0.3% volatility
-                trend_quality *= (data["ATR"] / data["Close"]) / 0.003
-
-            # Reduce trend quality when momentum is too weak
-            min_momentum = 0.003  # Minimum 0.3% momentum
-            momentum = abs(price_momentum)
-            momentum_factor = 1.0  # Initialize with default value
-            if momentum < min_momentum:
-                momentum_factor = momentum / min_momentum
-                trend_quality *= momentum_factor  # Proportionally reduce quality based on weak momentum
-
-            logging.info(f"[{symbol}] EMA Separations - Fast-Med: {ema_fast_med_sep:.6f}, Med-Slow: {ema_med_slow_sep:.6f}")
-            logging.info(f"[{symbol}] Separation Ratio: {separation_ratio:.3f}")
-            logging.info(f"[{symbol}] Momentum Factor: {momentum_factor:.3f}")
-            logging.info(f"[{symbol}] Trend Quality: {trend_quality:.3f}")
 
             # First check for perfect technical alignment with meaningful separation
             if abs(ema_trend) == 1.0 and trend_quality >= 0.8:  # At least 80% of minimum separation
@@ -797,4 +851,102 @@ class SignalGenerator:
             logging.info(f"Weight increase: {increase:.3f}")
 
         return adjusted_weights
+
+    def _calculate_trend_quality(self, df_3m: pd.DataFrame, df_1m: pd.DataFrame) -> float:
+        """Calculate trend quality based on EMA separations and trend structure, optimized for DCA grid trading."""
+        try:
+            close = df_3m['close'].iloc[-1]
+            ema_fast = df_3m['ema_fast'].iloc[-1]
+            ema_medium = df_3m['ema_medium'].iloc[-1]
+            ema_slow = df_3m['ema_slow'].iloc[-1]
+
+            # Calculate EMA separations using ATR for normalization
+            atr = df_1m['atr'].iloc[-1]
+            if atr > 0:
+                ema_fast_med_sep = abs(ema_fast - ema_medium) / atr
+                ema_med_slow_sep = abs(ema_medium - ema_slow) / atr
+                price_ema_dist = abs(close - ema_fast) / atr
+            else:
+                ema_fast_med_sep = 0
+                ema_med_slow_sep = 0
+                price_ema_dist = 0
+
+            # Price-EMA distance factor (tighter for grid levels)
+            dist_factor = min(1.0, price_ema_dist / 1.5)  # Reduced from 2.0 to 1.5 ATR units
+
+            # Enhanced separation quality calculation with grid-optimized thresholds
+            min_sep = min(ema_fast_med_sep, ema_med_slow_sep)
+            max_sep = max(ema_fast_med_sep, ema_med_slow_sep)
+            separation_quality = min_sep / max_sep if max_sep > 0 else 0.0
+
+            # Separation ratio penalty (adjusted for grid trading)
+            separation_ratio = ema_fast_med_sep / ema_med_slow_sep if ema_med_slow_sep > 0 else 0.0
+            if separation_ratio > 3.0 or separation_ratio < 0.33:  # Tighter bounds for grid levels
+                separation_quality *= 0.6  # 40% penalty for very uneven separations
+            elif separation_ratio > 2.0 or separation_ratio < 0.5:  # More conservative thresholds
+                separation_quality *= 0.8  # 20% penalty for moderately uneven separations
+
+            # Add grid-specific boost for optimal separation
+            if 0.75 <= separation_ratio <= 1.5:  # Tighter ideal range for grid trading
+                separation_quality *= 1.3  # 30% boost for ideal grid spacing
+
+            # Enhanced alignment score with grid-optimized distance consideration
+            if (close > ema_fast > ema_medium > ema_slow):  # Bullish alignment
+                alignment_score = 1.0
+                if dist_factor > 0.7:  # Reduced from 0.8 for tighter grid levels
+                    alignment_score *= 0.85
+                elif dist_factor < 0.3:  # Increased from 0.2 for more grid opportunities
+                    alignment_score *= 1.2  # Increased boost for tight alignment
+            elif (close < ema_fast < ema_medium < ema_slow):  # Bearish alignment
+                alignment_score = 1.0
+                if dist_factor > 0.7:
+                    alignment_score *= 0.85
+                elif dist_factor < 0.3:
+                    alignment_score *= 1.2
+            elif ((close > ema_fast > ema_medium and ema_medium >= ema_slow) or
+                  (close < ema_fast < ema_medium and ema_medium <= ema_slow)):
+                alignment_score = 0.7
+            else:
+                alignment_score = 0.3
+
+            # Enhanced momentum quality using ATR for normalization
+            momentum_atr = (df_3m['close'].iloc[-1] - df_3m['close'].iloc[-4]) / (atr * 3) if atr > 0 else 0
+            momentum_quality = min(1.0, abs(momentum_atr))  # Normalized by ATR
+
+            # Momentum consistency check with grid-optimized thresholds
+            short_momentum = (df_3m['close'].iloc[-1] - df_3m['close'].iloc[-3]) / (atr * 2) if atr > 0 else 0
+            med_momentum = (df_3m['close'].iloc[-1] - df_3m['close'].iloc[-5]) / (atr * 4) if atr > 0 else 0
+
+            if abs(momentum_atr) < 0.15:  # Reduced from 0.2 for more sensitive momentum detection
+                momentum_quality *= 0.8  # Less severe penalty
+            elif np.sign(short_momentum) != np.sign(med_momentum):
+                momentum_quality *= 0.9  # Less severe penalty for inconsistency
+
+            # Final weighted calculation with grid-optimized weights
+            trend_quality = (
+                0.40 * separation_quality +    # Increased weight for separation
+                0.40 * alignment_score +       # Equal weight for alignment
+                0.20 * momentum_quality        # Same weight for momentum
+            )
+
+            # Enhanced volatility adjustments using ATR percentage
+            volatility = df_1m['atr_pct'].iloc[-1]  # ATR% is already price-independent
+            if volatility > 0.3:  # Increased from 0.25% for wider grid levels
+                trend_quality *= (1 - min(0.3, (volatility - 0.3) / 0.3))  # Less aggressive penalty
+            elif volatility < 0.1:  # Increased from 0.08% for wider grid levels
+                boost_factor = (0.1 - volatility) / 0.1
+                if momentum_quality > 0.5:  # Reduced threshold for grid trading
+                    trend_quality *= (1 + boost_factor * 0.2)  # Reduced boost for stability
+                else:
+                    trend_quality *= (1 + boost_factor * 0.1)  # Minimal boost for weak momentum
+
+            # Additional boost for perfect alignment with good separation
+            if alignment_score >= 1.0 and separation_quality > 0.6:  # Reduced from 0.7 for grid trading
+                trend_quality *= 1.2  # Reduced from 1.3 for more stable grid signals
+
+            return max(0.0, min(1.0, trend_quality))
+
+        except Exception as e:
+            logging.error(f"Error calculating trend quality: {e}")
+            return 0.0
 
