@@ -341,11 +341,12 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                     inactive_pos_time_threshold,
                     long_pos_qty,
                     short_pos_qty,
+                    action,
                     previous_long_pos_qty=self.previous_long_pos_qty,
                     previous_short_pos_qty=self.previous_short_pos_qty,
                 ):
                     logging.info(
-                        f"[{symbol}] No open positions in the last {inactive_pos_time_threshold} seconds. Terminating the thread."
+                        f"[{symbol}] No open {action} positions in the last {inactive_pos_time_threshold} seconds. Terminating the thread."
                     )
                     state.shared_symbols_data.pop(symbol, None)
                     return

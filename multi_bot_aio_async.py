@@ -129,7 +129,7 @@ class SingleBot:
         signal.signal(signal.SIGINT, self._signal_handler)
 
         loop = asyncio.get_running_loop()
-        loop.set_default_executor(ThreadPoolExecutor(max_workers=max(self.exchange_config.symbols_allowed * 2, 100)))
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=max(self.symbols_allowed * 2, 100)))
 
     async def run(self):
         # Start the live table in a separate task
@@ -180,7 +180,7 @@ class SingleBot:
                 new_symbols = {}
 
                 # it might open more than the allowed number of positions if there are open orders
-                if len(trading_symbols) < self.exchange_config.symbols_allowed:
+                if len(trading_symbols) < self.symbols_allowed:
                     if (
                         not self.rotator_symbols_cache["timestamp"]
                         or current_time - self.rotator_symbols_cache["timestamp"] >= self.CACHE_DURATION
@@ -296,11 +296,16 @@ class SingleBot:
             symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
 
             if symbol not in self.open_position_symbols:
+                print("symbol not in open_position_symbols: ", symbol)
+
                 if self.config_auto_graceful_stop:
                     logging.info(f"Symbol {symbol} not in open position symbols and auto graceful stop is enabled. Skipping trades.")
                     return
 
-                if len(self.open_position_symbols) >= self.exchange_config.symbols_allowed:
+                print("len(self.open_position_symbols): ", len(self.open_position_symbols))
+                print("self.symbols_allowed: ", self.symbols_allowed)
+
+                if len(self.open_position_symbols) >= self.symbols_allowed:
                     logging.debug(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
                     return
 
@@ -457,18 +462,18 @@ class SingleBot:
 
             if self.config_auto_graceful_stop:
                 if (
-                    current_long_positions >= self.exchange_config.symbols_allowed
+                    current_long_positions >= self.symbols_allowed
                     or len(self.unique_active_symbols)
-                    >= self.exchange_config.symbols_allowed
+                    >= self.symbols_allowed
                 ) and not self.graceful_stop_long:
                     self.graceful_stop_long = True
                     logging.info(
                         f"GS Auto Check: Automatically enabled graceful stop for long positions. Current long positions: {current_long_positions}, Unique active symbols: {len(self.unique_active_symbols)}"
                     )
                 elif (
-                    current_long_positions < self.exchange_config.symbols_allowed
+                    current_long_positions < self.symbols_allowed
                     and len(self.unique_active_symbols)
-                    < self.exchange_config.symbols_allowed
+                    < self.symbols_allowed
                     and self.graceful_stop_long
                 ):
                     self.graceful_stop_long = self.config_graceful_stop_long
@@ -481,18 +486,18 @@ class SingleBot:
                     )
 
                 if (
-                    current_short_positions >= self.exchange_config.symbols_allowed
+                    current_short_positions >= self.symbols_allowed
                     or len(self.unique_active_symbols)
-                    >= self.exchange_config.symbols_allowed
+                    >= self.symbols_allowed
                 ) and not self.graceful_stop_short:
                     self.graceful_stop_short = True
                     logging.info(
                         f"GS Auto Check: Automatically enabled graceful stop for short positions. Current short positions: {current_short_positions}, Unique active symbols: {len(self.unique_active_symbols)}"
                     )
                 elif (
-                    current_short_positions < self.exchange_config.symbols_allowed
+                    current_short_positions < self.symbols_allowed
                     and len(self.unique_active_symbols)
-                    < self.exchange_config.symbols_allowed
+                    < self.symbols_allowed
                     and self.graceful_stop_short
                 ):
                     logging.info(
@@ -912,7 +917,7 @@ class SingleBot:
             open_long_time_ago = order['timestamp'] < (datetime.now() - timedelta(minutes=5)).timestamp() * 1000
 
             # no active traders running for symbol OR open long time ago
-            if symbol not in self.trading_symbols or open_long_time_ago:
+            if symbol not in self.open_position_symbols and open_long_time_ago:
                 logging.info(f"[{symbol}] found open order without position")
                 running_long = symbol in self.traders['long'] and self.traders['long'][symbol].running_trading('long')
                 running_short = symbol in self.traders['short'] and self.traders['short'][symbol].running_trading('short')

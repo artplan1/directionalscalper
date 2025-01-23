@@ -370,9 +370,9 @@ class BybitStrategy(BaseStrategy):
             logging.info(f"Recording initial activity time for {symbol} ({side})")
         return False
 
-    def check_position_inactivity(self, symbol, inactive_pos_time_threshold, long_pos_qty, short_pos_qty, previous_long_pos_qty, previous_short_pos_qty):
+    def check_position_inactivity(self, symbol, inactive_pos_time_threshold, long_pos_qty, short_pos_qty, action, previous_long_pos_qty, previous_short_pos_qty):
         current_time = time.time()
-        logging.info(f"Checking position inactivity for {symbol} at {current_time}")
+        logging.info(f"Checking {action} position inactivity for {symbol} at {current_time}")
 
         has_open_long_position = long_pos_qty > 0
         has_open_short_position = short_pos_qty > 0
@@ -380,11 +380,11 @@ class BybitStrategy(BaseStrategy):
         logging.info(f"Open positions status for {symbol} - Long: {'found' if has_open_long_position else 'none'}, Short: {'found' if has_open_short_position else 'none'}")
 
         # Determine inactivity and handle accordingly
-        if not has_open_long_position:
+        if action == 'long' and not has_open_long_position:
             if self.handle_inactivity(symbol, 'long', current_time, inactive_pos_time_threshold, previous_long_pos_qty):
                 return True
 
-        if not has_open_short_position:
+        if action == 'short' and not has_open_short_position:
             if self.handle_inactivity(symbol, 'short', current_time, inactive_pos_time_threshold, previous_short_pos_qty):
                 return True
 
