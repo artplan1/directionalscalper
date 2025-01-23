@@ -296,12 +296,12 @@ class SingleBot:
             symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
 
             if symbol not in self.open_position_symbols and len(self.open_position_symbols) >= self.exchange_config.symbols_allowed:
-                logging.info(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
+                logging.debug(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
                 return
 
             # if both runners are running, no need to process trades
             if (symbol in self.long_threads and not self.long_threads[symbol].done()) and (symbol in self.short_threads and not self.short_threads[symbol].done()):
-                logging.info(f"[{symbol}] Both runners are running. Skipping trades.")
+                logging.debug(f"[{symbol}] Both runners are running. Skipping trades.")
                 return
 
             # Process 1m data
@@ -346,7 +346,7 @@ class SingleBot:
                 )
                 self._process_signal(symbol=symbol, signal=signal)
             else:
-                logging.info(f"Missing data for symbol {symbol} in one of the timeframes")
+                logging.error(f"Missing data for symbol {symbol} in one of the timeframes")
 
         except Exception as e:
             logging.warning(f"Error processing trades: {e}")
@@ -670,7 +670,7 @@ class SingleBot:
         else:
             logging.info(f"Non-neutral signal received for {symbol}. Starting thread.")
 
-        logging.info(f"Has open long: {has_open_long}")
+        logging.info(f"[{symbol}] Has open long: {has_open_long}")
 
         if has_open_long or (self.long_mode):
             running_long_thread = symbol in self.long_threads and not self.long_threads[symbol].done()
@@ -678,13 +678,13 @@ class SingleBot:
             if not running_long_thread:
                 thread_started = self._start_thread_for_symbol(symbol, signal, "long")
                 action_taken = thread_started
-                logging.info(
-                    f"[DEBUG] {'Started' if thread_started else 'Failed to start'} long thread for symbol {symbol} based on {signal} signal"
+                logging.debug(
+                    f"{'Started' if thread_started else 'Failed to start'} long thread for symbol {symbol} based on {signal} signal"
                 )
             else:
-                logging.info(f"Long thread already running for symbol {symbol}. Skipping.")
+                logging.debug(f"Long thread already running for symbol {symbol}. Skipping.")
 
-        logging.info(f"Has open short: {has_open_short}")
+        logging.info(f"[{symbol}] Has open short: {has_open_short}")
 
         if has_open_short and self.short_mode:
             running_short_thread = symbol in self.short_threads and not self.short_threads[symbol].done()
@@ -692,11 +692,11 @@ class SingleBot:
             if not running_short_thread:
                 thread_started = self._start_thread_for_symbol(symbol, signal, "short")
                 action_taken = thread_started
-                logging.info(
-                    f"[DEBUG] {'Started' if thread_started else 'Failed to start'} short thread for symbol {symbol} based on {signal} signal"
+                logging.debug(
+                    f"{'Started' if thread_started else 'Failed to start'} short thread for symbol {symbol} based on {signal} signal"
                 )
             else:
-                logging.info(f"Short thread already running for symbol {symbol}. Skipping.")
+                logging.debug(f"Short thread already running for symbol {symbol}. Skipping.")
 
         # Log if no action was taken
         if not action_taken:
@@ -774,7 +774,7 @@ class SingleBot:
                 logging.info(f"[{symbol}] long can trade: {trader.running_long}")
 
                 if not trader.running_long:
-                    logging.info(f"Removing {symbol} from trading symbols")
+                    logging.info(f"Removing {symbol} from trading long symbols")
                     del self.traders[action][symbol]
 
                     # Remove only long position for this specific symbol
@@ -796,7 +796,7 @@ class SingleBot:
                 logging.info(f"[{symbol}] short can trade: {trader.running_short}")
 
                 if not trader.running_short:
-                    logging.info(f"Removing {symbol} from trading symbols")
+                    logging.info(f"Removing {symbol} from trading short symbols")
                     del self.traders[action][symbol]
                     # self.trading_symbols.discard(symbol)
 
