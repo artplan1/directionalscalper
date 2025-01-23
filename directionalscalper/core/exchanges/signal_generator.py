@@ -355,8 +355,21 @@ class SignalGenerator:
             df['ema_slow'].iloc[-1],
         )
         macd, macd_signal = df['macd'].iloc[-1], df['macd_signal'].iloc[-1]
-        is_uptrend = (close > ema_fast and ema_fast > ema_medium) or (macd > macd_signal)
-        is_downtrend = (close < ema_fast and ema_fast < ema_medium) or (macd < macd_signal)
+
+        # Make conditions mutually exclusive and more strict
+        is_uptrend = (close > ema_fast and
+                     ema_fast > ema_medium and
+                     macd > macd_signal)
+
+        is_downtrend = (close < ema_fast and
+                       ema_fast < ema_medium and
+                       macd < macd_signal)
+
+        # Ensure trends are mutually exclusive
+        if is_uptrend and is_downtrend:
+            is_uptrend = False
+            is_downtrend = False
+
         return is_uptrend, is_downtrend
 
     def _detect_market_regime(self, df: pd.DataFrame, symbol: str) -> str:
