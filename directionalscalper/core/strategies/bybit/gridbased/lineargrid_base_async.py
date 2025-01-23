@@ -302,7 +302,7 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
             logging.info(f"[{symbol}] Current long pos qty: {long_pos_qty}")
             logging.info(f"[{symbol}] Current short pos qty: {short_pos_qty}")
 
-            if self.previous_long_pos_qty > 0 and long_pos_qty == 0:
+            if action == "long" and self.previous_long_pos_qty > 0 and long_pos_qty == 0:
                 logging.info(
                     f"[{symbol}] Long position closed. Canceling long grid orders."
                 )
@@ -316,7 +316,8 @@ class LinearGridBaseFuturesAsync(BybitStrategy):
                 self.running_long = False
                 self.previous_long_pos_qty = 0
                 return
-            elif self.previous_short_pos_qty > 0 and short_pos_qty == 0:
+
+            if action == "short" and self.previous_short_pos_qty > 0 and short_pos_qty == 0:
                 logging.info(
                     f"[{symbol}] Short position closed. Canceling short grid orders."
                 )
