@@ -135,6 +135,9 @@ class SingleBot:
         # Start the live table in a separate task
         asyncio.create_task(self._run_live_table())
 
+        # Start periodic position updates
+        asyncio.create_task(self._periodic_position_update())
+
         # load positions data, clear open orders etc
         await self._prepare()
 
@@ -237,7 +240,8 @@ class SingleBot:
         await asyncio.gather(
             self._subscribe_to_balance_ws(),
             self._subscribe_to_trades_ws(),
-            self._subscribe_to_positions_ws(),
+            # it returns invalid position data
+            # self._subscribe_to_positions_ws(),
         )
 
         logging.info("Closing WebSocket connection...")
@@ -320,7 +324,7 @@ class SingleBot:
                 current_time = pd.Timestamp.now(tz="UTC").tz_localize(None)  # Get current time in UTC and make it naive
 
                 # If more than 3 minutes have passed since last 3m candle
-                if (current_time - last_3m_candle_time).total_seconds() >= 180:
+                if (current_time - last_3m_candle_time).total_seconds() >= 120:
                     # Fetch new 3m data
                     logging.info(f"[{symbol}] Fetching new 3m data")
                     new_3m_data = await self._fetch_ohlcvc(symbol, "3m", limit=5)
@@ -350,43 +354,45 @@ class SingleBot:
     async def _subscribe_to_positions_ws(self):
         while not self.stop:
             try:
-                # watching only position changes
-                position_data = await self.ws_exchange.watch_positions(since=self.last_positions_watched)
+                # print(f"Subscribing to positions ws. Last positions watched: {self.last_positions_watched}")
 
-                self.last_positions_watched = self.ws_exchange.milliseconds()
+                # watching only position changes
+                position_data = await self.ws_exchange.watch_positions()
 
                 for position in position_data:
                     side = position['side']
 
-                    if not side or side not in ["long", "short"]:
+                    if side is None:
                         continue
 
                     symbol = self._bybit_symbol_reverse(position["symbol"])
 
-                    # if float(position.get("contracts", 0)) == 0 and symbol in self.open_position_data:
-                    #     print("EMPTY POSITION: ", position)
+                    if position['info']['side'] == '' and symbol in self.open_position_data:
+                        print(f"[{symbol}] EMPTY POSITION: {position}")
 
-                    #     logging.info(f"[{symbol}] {side} position closed. Removing from open position data.")
+                        # logging.info(f"[{symbol}] {side} position closed. Removing from open position data.")
 
-                    #     existing_pos_idx = next(
-                    #         (
-                    #             idx
-                    #             for idx, p in enumerate(self.open_position_data[symbol])
-                    #             if p["side"].lower() == side
-                    #         ),
-                    #         None,
-                    #     )
+                        # existing_pos_idx = next(
+                        #     (
+                        #         idx
+                        #         for idx, p in enumerate(self.open_position_data[symbol])
+                        #         if p["side"].lower() == side
+                        #     ),
+                        #     None,
+                        # )
 
-                    #     if existing_pos_idx is not None:
-                    #         self.open_position_data[symbol].pop(existing_pos_idx)
+                        # if existing_pos_idx is not None:
+                        #     self.open_position_data[symbol].pop(existing_pos_idx)
 
-                    #     continue
+                        # continue
 
                     self.trading_symbols.add(symbol)
 
                     if symbol not in self.open_position_data:
                         self.open_position_data[symbol] = [position]
                     else:
+                        print(f"symbol: {symbol} in open_position_data")
+
                         existing_pos_idx = next(
                             (
                                 idx
@@ -395,6 +401,10 @@ class SingleBot:
                             ),
                             None,
                         )
+
+                        print(f"{symbol} positions: ", self.open_position_data[symbol])
+
+                        print(f"existing_pos_idx: {existing_pos_idx}")
 
                         if existing_pos_idx is not None:
                             self.open_position_data[symbol][existing_pos_idx] = position
@@ -766,9 +776,18 @@ class SingleBot:
                 if not trader.running_long:
                     logging.info(f"Removing {symbol} from trading symbols")
                     del self.traders[action][symbol]
+
+                    # Remove only long position for this specific symbol
+                    if symbol in self.open_position_data:
+                        positions = self.open_position_data[symbol]
+                        # Find the long position index
+                        long_pos_idx = next((idx for idx, pos in enumerate(positions) if pos["side"].lower() == "long"), None)
+                        if long_pos_idx is not None:
+                            logging.info(f"Removing open long position for {symbol}")
+                            # Remove only the long position
+                            self.open_position_data[symbol].pop(long_pos_idx)
+
                     # self.trading_symbols.discard(symbol)
-                    self.open_position_data.pop(symbol, None)
-                    self.open_position_symbols.discard(symbol)
                     # self.finished_trading_symbols["long"].add(symbol)
             elif action == "short":
                 await asyncio.to_thread(trader.run, symbol, mfirsi_signal=signal, action="short", open_symbols=self.open_position_symbols)
@@ -780,9 +799,23 @@ class SingleBot:
                     logging.info(f"Removing {symbol} from trading symbols")
                     del self.traders[action][symbol]
                     # self.trading_symbols.discard(symbol)
-                    self.open_position_data.pop(symbol, None)
-                    self.open_position_symbols.discard(symbol)
+
+                    # Remove only short position for this specific symbol
+                    if symbol in self.open_position_data:
+                        positions = self.open_position_data[symbol]
+                        # Find the short position index
+                        short_pos_idx = next((idx for idx, pos in enumerate(positions) if pos["side"].lower() == "short"), None)
+                        if short_pos_idx is not None:
+                            logging.info(f"Removing open short position for {symbol}")
+                            # Remove only the short position
+                            self.open_position_data[symbol].pop(short_pos_idx)
+
                     # self.finished_trading_symbols["short"].add(symbol)
+
+            if not self.open_position_data[symbol]:
+                logging.info(f"Removing {symbol} from open position data")
+                self.open_position_data.pop(symbol, None)
+                self.open_position_symbols.discard(symbol)
         except Exception as e:
             logging.error(f"Error running strategy for {symbol}: {e}")
 
@@ -800,8 +833,14 @@ class SingleBot:
         # preloading open positions here to have them available immediately for websocket
         open_position_data = await self.exchange.get_all_open_positions_async()
 
+        self.open_position_data = {}
+
         for position in open_position_data:
             symbol = self._bybit_symbol_reverse(position["symbol"])
+
+            if symbol in self.config.bot.blacklist:
+                logging.info(f"[{symbol}] skipping position update due to blacklist")
+                continue
 
             if symbol not in self.open_position_data:
                 self.open_position_data[symbol] = [position]
@@ -857,7 +896,12 @@ class SingleBot:
         for order in open_orders:
             symbol = order['info']['symbol']
 
-            if order['info']['stopOrderType'] == 'TakeProfit':
+            if symbol in self.config.bot.blacklist:
+                logging.info(f"[{symbol}] skipping dangling order management due to blacklist")
+                continue
+
+            if order['info']['stopOrderType'] == 'TakeProfit' or order['info']['stopOrderType'] == 'PartialTakeProfit':
+                logging.info(f"[{symbol}] skipping take profit order. Likely manual.")
                 continue
 
             open_long_time_ago = order['timestamp'] < (datetime.now() - timedelta(minutes=5)).timestamp() * 1000
@@ -895,6 +939,15 @@ class SingleBot:
         elif self.sigint_count == 2:
             logging.info("Second SIGINT received. Forcing exit...")
             os._exit(0)
+
+    async def _periodic_position_update(self):
+        while not self.stop:
+            try:
+                await self._update_position_data()
+                await asyncio.sleep(30)  # Update every 30 seconds
+            except Exception as e:
+                logging.exception(f"Error in periodic position update: {e}")
+                await asyncio.sleep(5)  # On error, wait 5 seconds before retrying
 
 
 async def main():
