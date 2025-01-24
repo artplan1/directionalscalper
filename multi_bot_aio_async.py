@@ -673,11 +673,11 @@ class SingleBot:
                 f"Neutral signal received for {symbol}. Managing open positions."
             )
         else:
-            logging.info(f"Non-neutral signal received for {symbol}. Starting thread.")
+            logging.info(f"{signal} signal received for {symbol}. Starting thread.")
 
         logging.info(f"[{symbol}] Has open long: {has_open_long}")
 
-        if has_open_long or (self.long_mode):
+        if has_open_long or self.long_mode:
             running_long_thread = symbol in self.long_threads and not self.long_threads[symbol].done()
 
             if not running_long_thread:
@@ -691,7 +691,7 @@ class SingleBot:
 
         logging.info(f"[{symbol}] Has open short: {has_open_short}")
 
-        if has_open_short and self.short_mode:
+        if has_open_short or self.short_mode:
             running_short_thread = symbol in self.short_threads and not self.short_threads[symbol].done()
 
             if not running_short_thread:
