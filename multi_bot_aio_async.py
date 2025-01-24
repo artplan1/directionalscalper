@@ -296,14 +296,9 @@ class SingleBot:
             symbol = self._bybit_symbol_reverse(bybit_symbol_by_trades)
 
             if symbol not in self.open_position_symbols:
-                print("symbol not in open_position_symbols: ", symbol)
-
                 if self.config_auto_graceful_stop:
                     logging.info(f"Symbol {symbol} not in open position symbols and auto graceful stop is enabled. Skipping trades.")
                     return
-
-                print("len(self.open_position_symbols): ", len(self.open_position_symbols))
-                print("self.symbols_allowed: ", self.symbols_allowed)
 
                 if len(self.open_position_symbols) >= self.symbols_allowed:
                     logging.debug(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
