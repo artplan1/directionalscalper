@@ -48,6 +48,50 @@ class SignalGenerator:
             logging.info(f"1m index type: {type(df_1m.index)}")
             logging.info(f"1m data shape: {df_1m.shape}, 3m data shape: {df_3m.shape}")
 
+            # Log last 3 candles information
+            try:
+                last_3_candles = df_1m[['open', 'high', 'low', 'close', 'volume']].tail(3)
+                if len(last_3_candles) > 0:
+                    logging.info(f"\n[{symbol}] Last 3 candles (1m):")
+                    prev_close = None
+                    for idx, candle in last_3_candles.iterrows():
+                        try:
+                            candle_body = abs(candle['close'] - candle['open'])
+                            candle_total_range = candle['high'] - candle['low']
+                            body_to_range_ratio = (candle_body / candle_total_range * 100) if candle_total_range != 0 else 0
+                            direction = "Bullish" if candle['close'] > candle['open'] else "Bearish"
+
+                            # Calculate change from previous candle
+                            change_str = ""
+                            if prev_close is not None:
+                                change_pct = ((candle['close'] - prev_close) / prev_close) * 100
+                                change_str = f" | Chg: {change_pct:+.2f}%"
+
+                            # Check for high volatility candle
+                            vol_note = ""
+                            if body_to_range_ratio > 80:
+                                vol_note = " [Strong]"
+                            elif candle_total_range/candle['open'] > 0.003:  # 0.3% range
+                                vol_note = " [High Range]"
+
+                            # Safe timestamp formatting
+                            try:
+                                if isinstance(idx, pd.Timestamp):
+                                    timestamp = idx.strftime('%H:%M:%S')
+                                else:
+                                    timestamp = str(idx)
+                            except:
+                                timestamp = str(idx)
+
+                            logging.info(f"[{symbol}] {timestamp} - {direction}{vol_note} | O: {candle['open']:.4f} H: {candle['high']:.4f} L: {candle['low']:.4f} C: {candle['close']:.4f} | Body/Range: {body_to_range_ratio:.1f}%{change_str} | Vol: {candle['volume']:.2f}")
+                            prev_close = candle['close']
+                        except Exception as e:
+                            logging.error(f"[{symbol}] Error processing candle at {idx}: {str(e)}")
+                else:
+                    logging.warning(f"[{symbol}] No recent candles available for analysis")
+            except Exception as e:
+                logging.error(f"[{symbol}] Error analyzing recent candles: {str(e)}")
+
             # Calculate indicators
             try:
                 logging.info(f"[{symbol}] Starting indicator calculations")
