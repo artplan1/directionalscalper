@@ -521,27 +521,29 @@ class SignalGenerator:
 
             # Regime detection with adaptive thresholds
             # Calculate adaptive thresholds based on historical volatility
-            vol_threshold = max(1.2, baseline_volatility / recent_volatility * 1.1)
-            momentum_threshold_1m = max(0.005, atr_pct * 0.1)  # 10% of current volatility
-            momentum_threshold_3m = max(0.01, atr_pct * 0.2)   # 20% of current volatility
+            vol_threshold = max(1.05, baseline_volatility / recent_volatility * 1.05)  # Reduced from 1.2 to 1.05
+            momentum_threshold_1m = max(0.002, atr_pct * 0.05)  # Reduced from 0.005 to 0.002 and from 10% to 5%
+            momentum_threshold_3m = max(0.004, atr_pct * 0.1)   # Reduced from 0.01 to 0.004 and from 20% to 10%
 
             # 1. Volatile: Adaptive volatility ratio OR strong momentum
             if (vol_ratio > vol_threshold or
                 abs(short_momentum) > momentum_threshold_1m or
-                abs(medium_momentum) > momentum_threshold_3m):
+                abs(medium_momentum) > momentum_threshold_3m or
+                atr_pct > 0.3):  # Added direct ATR check
                 return 'volatile'
 
             # 2. Trending: Strong trend alignment with momentum confirmation
-            elif ((trend_alignment != 0 and abs(medium_momentum) > momentum_threshold_3m * 0.5) or
-                  (close < ema_fast < ema_medium < ema_slow and short_momentum < -momentum_threshold_1m * 0.3) or
-                  (close > ema_fast > ema_medium > ema_slow and short_momentum > momentum_threshold_1m * 0.3)):
+            elif ((trend_alignment != 0 and abs(medium_momentum) > momentum_threshold_3m * 0.3) or  # Reduced from 0.5
+                  (close < ema_fast < ema_medium < ema_slow and short_momentum < -momentum_threshold_1m * 0.2) or  # Reduced from 0.3
+                  (close > ema_fast > ema_medium > ema_slow and short_momentum > momentum_threshold_1m * 0.2)):  # Reduced from 0.3
                 return 'trending'
 
-            # 3. Ranging: Adaptive low momentum thresholds
-            elif (abs(medium_momentum) < momentum_threshold_3m * 0.15 and
-                  abs(short_momentum) < momentum_threshold_1m * 0.2 and
-                  direction_changes >= 3 and
-                  vol_ratio < 0.9):
+            # 3. Ranging: Adaptive low momentum thresholds with trend check
+            elif (abs(medium_momentum) < momentum_threshold_3m * 0.2 and  # Increased from 0.15
+                  abs(short_momentum) < momentum_threshold_1m * 0.25 and  # Increased from 0.2
+                  direction_changes >= 2 and  # Reduced from 3
+                  trend_alignment == 0 and  # Added trend alignment check
+                  vol_ratio < 0.95):  # Increased from 0.9
                 return 'ranging'
 
             # 4. Normal: Default state
