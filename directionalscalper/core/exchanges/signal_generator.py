@@ -539,11 +539,13 @@ class SignalGenerator:
                 return 'trending'
 
             # 3. Ranging: Adaptive low momentum thresholds with trend check
-            elif (abs(medium_momentum) < momentum_threshold_3m * 0.2 and  # Increased from 0.15
-                  abs(short_momentum) < momentum_threshold_1m * 0.25 and  # Increased from 0.2
-                  direction_changes >= 2 and  # Reduced from 3
-                  trend_alignment == 0 and  # Added trend alignment check
-                  vol_ratio < 0.95):  # Increased from 0.9
+            elif (abs(medium_momentum) < momentum_threshold_3m * 0.3 and  # Increased from 0.2
+                  abs(short_momentum) < momentum_threshold_1m * 0.35 and  # Increased from 0.25
+                  (direction_changes >= 2 or  # Original condition
+                   (abs(close - ema_fast) / close < 0.001 and  # Price close to fast EMA
+                    abs(ema_fast - ema_medium) / close < 0.001)) and  # EMAs compressed
+                  abs(trend_alignment) <= 1 and  # Allow slight trend alignment
+                  vol_ratio < 1.05):  # Increased from 0.95
                 return 'ranging'
 
             # 4. Normal: Default state
