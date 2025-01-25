@@ -609,13 +609,19 @@ class SignalGenerator:
                 abs(trend_alignment) == 1 and
                 abs(medium_momentum) > momentum_threshold_3m * 0.15 and
                 (
-                    (completed_volume > avg_volume * 1.2 and  # Use completed for trend confirmation
+                    # Either good EMA structure with moderate volume
+                    (completed_volume > avg_volume * 1.0 and  # Reduced from 1.2
                      ema_compression > 0.003) or
-                    (abs(medium_momentum) > momentum_threshold_3m * 0.3 and
-                     completed_volume > avg_volume * 1.1)  # Use completed for trend confirmation
+                    # Or strong momentum with any volume
+                    (abs(medium_momentum) > momentum_threshold_3m * 0.3)
                 ) and
                 direction_changes <= 2
             ):
+                # Log volume comparison for analysis
+                logging.info(f"[{symbol}] Volume Analysis for Trend Detection:")
+                logging.info(f"[{symbol}] Completed Volume: {completed_volume:.2f}")
+                logging.info(f"[{symbol}] Average Volume: {avg_volume:.2f}")
+                logging.info(f"[{symbol}] Volume Ratio: {completed_volume/avg_volume:.2f}x")
                 return 'trending'
 
             # 3. Normal regime detection - Use completed candle for stability
