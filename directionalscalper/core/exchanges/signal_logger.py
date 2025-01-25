@@ -207,3 +207,26 @@ class SignalLogger:
         except Exception as e:
             self.error_logger.error(f"Failed to clear history for {symbol or 'all symbols'}: {e}")
             self.error_logger.error(traceback.format_exc())
+
+    def cleanup(self):
+        """Cleanup resources by closing all handlers."""
+        try:
+            # Close error logger handlers
+            for handler in self.error_logger.handlers:
+                handler.close()
+                self.error_logger.removeHandler(handler)
+
+            # Close all symbol-specific logger handlers
+            for logger in self.loggers.values():
+                for handler in logger.handlers:
+                    handler.close()
+                    logger.removeHandler(handler)
+            self.loggers.clear()
+
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+            print(traceback.format_exc())
+
+    def __del__(self):
+        """Destructor to ensure cleanup is called."""
+        self.cleanup()

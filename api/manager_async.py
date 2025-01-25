@@ -79,7 +79,7 @@ class ManagerAsync(Manager):
 
                         logging.debug(f"Processing symbol {symbol} with min_qty {min_qty} and USD price {usd_price}")
 
-                        if (min_qty_threshold is None or min_qty <= min_qty_threshold) and five_m_volume > 200000:
+                        if (min_qty_threshold is None or min_qty <= min_qty_threshold) and five_m_volume > 100000:
                             symbols.append(symbol)
 
                     logging.info(f"Returning {len(symbols)} symbols")

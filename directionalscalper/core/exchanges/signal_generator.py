@@ -20,11 +20,24 @@ class SignalGenerator:
         self.exchange = exchange
         self.signal_logger = SignalLogger()
 
+    def cleanup(self):
+        """Cleanup resources by closing the signal logger."""
+        try:
+            if hasattr(self, 'signal_logger'):
+                self.signal_logger.cleanup()
+        except Exception as e:
+            print(f"Error during SignalGenerator cleanup: {e}")
+            print(traceback.format_exc())
+
+    def __del__(self):
+        """Destructor to ensure cleanup is called."""
+        self.cleanup()
+
     def generate(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         """Generate trading signals using balanced approach between old and new implementations."""
-        try:
-            logger = self.signal_logger.get_logger(symbol)
+        logger = self.signal_logger.get_logger(symbol)
 
+        try:
             # Convert list to DataFrame if needed
             if isinstance(ohlcv_1m, list):
                 logger.info("Converting 1m data to DataFrame")
