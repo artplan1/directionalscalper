@@ -404,7 +404,7 @@ class SignalGenerator:
 
             del df_1m, df_3m
 
-            logger.info(f"[{symbol}] signal: {json.dumps(signal_data)}")
+            logging.info(f"[{symbol}] signal: {json.dumps(signal_data)}")
 
             return new_signal
         except Exception as e:
