@@ -316,7 +316,7 @@ class SignalGenerator:
             else:
                 new_signal = "neutral"
 
-            logger.info(f"New Signal: {new_signal}")
+            logger.info(f"[{symbol}] New Signal: {new_signal}")
 
             # Signal buffer logic with proper buffering
             current_time = time.time()
