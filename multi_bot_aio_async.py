@@ -301,12 +301,12 @@ class SingleBot:
                     return
 
                 if len(self.open_position_symbols) >= self.symbols_allowed:
-                    logging.debug(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
+                    logging.info(f"[{symbol}] Not in open position symbols and open position symbols limit reached. Skipping trades.")
                     return
 
             # if both runners are running, no need to process trades
             if (symbol in self.long_threads and not self.long_threads[symbol].done()) and (symbol in self.short_threads and not self.short_threads[symbol].done()):
-                logging.debug(f"[{symbol}] Both runners are running. Skipping trades.")
+                logging.info(f"[{symbol}] Both runners are running. Skipping trades.")
                 return
 
             # Process 1m data

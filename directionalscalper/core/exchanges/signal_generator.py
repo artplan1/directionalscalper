@@ -167,16 +167,25 @@ class SignalGenerator:
 
             # Prepare data for weighted signal calculation
             signal_data = {
-                "Close": df_3m['close'].iloc[-1],
-                'MACD': df_3m['macd'].iloc[-1],
-                'MACD_Signal': df_3m['macd_signal'].iloc[-1],
-                'EMA_Fast': df_3m['ema_fast'].iloc[-1],
-                'EMA_Medium': df_3m['ema_medium'].iloc[-1],
-                'EMA_Slow': df_3m['ema_slow'].iloc[-1],
-                'ATR': df_1m['atr'].iloc[-1],
-                'MACD_Range': df_3m['macd'].abs().max(),  # Add MACD range
-                'trend_quality': trend_quality  # Add trend quality to signal data
+                "Close": df_3m['close'].iloc[-2],  # Use completed candle
+                'MACD': df_3m['macd'].iloc[-2],
+                'MACD_Signal': df_3m['macd_signal'].iloc[-2],
+                'EMA_Fast': df_3m['ema_fast'].iloc[-2],
+                'EMA_Medium': df_3m['ema_medium'].iloc[-2],
+                'EMA_Slow': df_3m['ema_slow'].iloc[-2],
+                'ATR': df_3m['atr'].iloc[-2],  # Switch to 3m ATR for stability
+                'MACD_Range': df_3m['macd'].abs().max(),
+                'trend_quality': trend_quality,
+                # Use completed candles for pattern analysis
+                'last_three_closes': df_3m['close'].iloc[-4:-1].values.tolist(),  # -4 to -1 to get completed candles
+                'last_three_volumes': df_3m['volume'].iloc[-4:-1].values.tolist()
             }
+
+            # Log completed vs current candle for analysis
+            logging.info(f"""[{symbol}] Candle Analysis:
+                [{symbol}] Last Complete (3m) - Close: {df_3m['close'].iloc[-2]:.4f}, Volume: {df_3m['volume'].iloc[-2]:.2f}
+                [{symbol}] Current (3m) - Close: {df_3m['close'].iloc[-1]:.4f}, Volume: {df_3m['volume'].iloc[-1]:.2f}
+            """)
 
             # Calculate prediction if using nearest neighbor analysis
             if neighbors_count > 0:
@@ -343,6 +352,10 @@ class SignalGenerator:
                 # Cap maximum buffer time
                 buffer_time = min(buffer_time, 15)  # Maximum 15 seconds
 
+                # Apply volatility adjustment
+                if market_regime == "volatile" and current_volatility > 2.0:
+                    buffer_time *= 0.8  # Reduce buffer time in highly volatile conditions
+
                 logging.info(f"""[{symbol}] Buffer Analysis:
                     [{symbol}] Base Buffer: 8.0s
                     [{symbol}] Market Regime: {market_regime}
@@ -419,23 +432,31 @@ class SignalGenerator:
         macd = MACD(df['close'], window_slow=26, window_fast=12, window_sign=9, fillna=True)
         df['macd'] = macd.macd()
         df['macd_signal'] = macd.macd_signal()
+
+        # Add ATR calculation for 3m timeframe
+        atr_indicator = AverageTrueRange(
+            high=df['high'], low=df['low'], close=df['close'], window=14, fillna=True
+        )
+        df['atr'] = atr_indicator.average_true_range()
+        df['atr_pct'] = (df['atr'] / df['close']) * 100
+
         return df
 
     def detect_trend(self, df: pd.DataFrame) -> Tuple[bool, bool]:
         """Detect if a strong uptrend or downtrend exists with crypto-specific enhancements."""
-        # Get latest values
-        close = df['close'].iloc[-1]
-        ema_fast = df['ema_fast'].iloc[-1]
-        ema_medium = df['ema_medium'].iloc[-1]
-        ema_slow = df['ema_slow'].iloc[-1]
-        macd = df['macd'].iloc[-1]
-        macd_signal = df['macd_signal'].iloc[-1]
+        # Get latest completed candle values
+        close = df['close'].iloc[-2]
+        ema_fast = df['ema_fast'].iloc[-2]
+        ema_medium = df['ema_medium'].iloc[-2]
+        ema_slow = df['ema_slow'].iloc[-2]
+        macd = df['macd'].iloc[-2]
+        macd_signal = df['macd_signal'].iloc[-2]
 
-        # Calculate EMA slopes for momentum
-        ema_fast_slope = (df['ema_fast'].iloc[-1] - df['ema_fast'].iloc[-2]) / df['ema_fast'].iloc[-2]
-        ema_medium_slope = (df['ema_medium'].iloc[-1] - df['ema_medium'].iloc[-2]) / df['ema_medium'].iloc[-2]
+        # Calculate EMA slopes using completed candles
+        ema_fast_slope = (df['ema_fast'].iloc[-2] - df['ema_fast'].iloc[-3]) / df['ema_fast'].iloc[-3]
+        ema_medium_slope = (df['ema_medium'].iloc[-2] - df['ema_medium'].iloc[-3]) / df['ema_medium'].iloc[-3]
 
-        # Calculate EMA compression
+        # Calculate EMA compression using completed candles
         ema_ranges = [ema_fast, ema_medium, ema_slow]
         ema_compression = (max(ema_ranges) - min(ema_ranges)) / close
 
@@ -460,6 +481,14 @@ class SignalGenerator:
               ema_fast < ema_medium))                 # with fast below medium
         )
 
+        # Log trend detection using completed candles
+        logging.info(f"Trend Detection (Using Completed Candles):")
+        logging.info(f"Close: {close:.4f}")
+        logging.info(f"EMAs - Fast: {ema_fast:.4f}, Medium: {ema_medium:.4f}, Slow: {ema_slow:.4f}")
+        logging.info(f"EMA Slopes - Fast: {ema_fast_slope:.6f}, Medium: {ema_medium_slope:.6f}")
+        logging.info(f"MACD: {macd:.6f}, Signal: {macd_signal:.6f}")
+        logging.info(f"EMA Compression: {ema_compression:.6f}")
+
         # Ensure trends are mutually exclusive
         if is_uptrend and is_downtrend:
             is_uptrend = False
@@ -470,25 +499,49 @@ class SignalGenerator:
     def _detect_market_regime(self, df: pd.DataFrame, df_3m: pd.DataFrame, symbol: str) -> str:
         """Detect market regime based on volatility and momentum patterns."""
         try:
-            # Volatility metrics (keep on 1m for accuracy)
-            atr_pct = df['atr_pct'].iloc[-1]
-            recent_volatility = df['atr_pct'].rolling(10).mean().iloc[-1]
-            baseline_volatility = df['atr_pct'].rolling(30).mean().iloc[-1]
+            # Base calculations on completed candles
+            atr_pct = df['atr_pct'].iloc[-2]  # Completed candle
+            recent_volatility = df_3m['atr_pct'].rolling(4).mean().iloc[-2]
+            baseline_volatility = df_3m['atr_pct'].rolling(10).mean().iloc[-2]
             vol_ratio = recent_volatility / baseline_volatility if baseline_volatility > 0 else 1
 
+            # Early warning checks using incomplete candle
+            current_atr = df['atr_pct'].iloc[-1]
+            current_close = df['close'].iloc[-1]
+            last_close = df['close'].iloc[-2]
+            current_volume = df['volume'].iloc[-1]
+            avg_volume = df['volume'].rolling(10).mean().iloc[-2]
+
+            # Detect potential volatility events with dynamic thresholds
+            volatility_warning = False
+            vol_spike_threshold = max(1.5, 1 + (atr_pct * 2.5))  # Increased for crypto
+            if current_atr > atr_pct * vol_spike_threshold:
+                volatility_warning = True
+                logging.info(f"[{symbol}] Volatility Warning: Current ATR {current_atr:.4f} vs Complete {atr_pct:.4f}")
+
+            # Detect potential trend reversal with volume confirmation
+            reversal_warning = False
+            price_change = abs(current_close - last_close) / last_close
+            volume_surge = current_volume > avg_volume * 2.0  # Increased for crypto's volume spikes
+            if price_change > atr_pct * 1.5 and volume_surge:  # More significant move required
+                reversal_warning = True
+                logging.info(f"[{symbol}] Reversal Warning: Price change {price_change:.4f} with {current_volume/avg_volume:.1f}x volume")
+
             # Price metrics from 3m data for trend consistency
-            close = df_3m['close'].iloc[-1]
-            ema_fast = df_3m['ema_fast'].iloc[-1]
-            ema_medium = df_3m['ema_medium'].iloc[-1]
-            ema_slow = df_3m['ema_slow'].iloc[-1]
+            close = df_3m['close'].iloc[-2]
+            ema_fast = df_3m['ema_fast'].iloc[-2]
+            ema_medium = df_3m['ema_medium'].iloc[-2]
+            ema_slow = df_3m['ema_slow'].iloc[-2]
 
-            # Calculate momentum from both timeframes
-            # Short-term momentum from 1m for quick moves
+            # Calculate momentum from both timeframes using completed candles
             smooth_changes_1m = df['close'].pct_change().ewm(span=3, adjust=False).mean()
-            short_momentum = smooth_changes_1m.rolling(3).sum().iloc[-1]  # 3m momentum
+            short_momentum = smooth_changes_1m.rolling(3).sum().iloc[-2]
+            medium_momentum = df_3m['close'].pct_change(3).iloc[-2]
 
-            # Medium-term momentum from 3m for trend alignment
-            medium_momentum = df_3m['close'].pct_change(3).iloc[-1]  # 9m momentum
+            # EMA separation and compression checks
+            ema_fast_med_separation = abs(ema_fast - ema_medium) / close
+            ema_med_slow_separation = abs(ema_medium - ema_slow) / close
+            ema_compression = max(ema_fast_med_separation, ema_med_slow_separation)
 
             # Trend alignment check using 3m EMAs
             trend_alignment = 0
@@ -497,64 +550,95 @@ class SignalGenerator:
             elif close < ema_fast < ema_medium < ema_slow:
                 trend_alignment = -1
 
-            # Count direction changes with minimum move filter (keep on 1m for accuracy)
-            min_move = atr_pct * 0.1  # 10% of ATR as minimum significant move
+            # Count direction changes with minimum move filter
+            min_move = atr_pct * 0.15  # Increased for crypto's larger moves
             direction_changes = (
                 (smooth_changes_1m.rolling(8)
                  .apply(lambda x: ((x > min_move) != (x < -min_move)).sum())
-                 .iloc[-1])
+                 .iloc[-2])
             )
 
             # Log all metrics for analysis
-            logging.info(f"""[{symbol}] Regime Detection Metrics:
-                [{symbol}] Current ATR%: {atr_pct:.4f}
-                [{symbol}] Recent Volatility (10m): {recent_volatility:.4f}
+            logging.info(f"""[{symbol}] Regime Detection Metrics (Using Completed Candles):
+                [{symbol}] Current ATR% (1m): {atr_pct:.4f}
+                [{symbol}] Recent Volatility (12m): {recent_volatility:.4f}
                 [{symbol}] Baseline Volatility (30m): {baseline_volatility:.4f}
                 [{symbol}] Volatility Ratio: {vol_ratio:.4f}
                 [{symbol}] Short Momentum (1m): {short_momentum:.4f}
                 [{symbol}] Medium Momentum (3m): {medium_momentum:.4f}
                 [{symbol}] Trend Alignment: {trend_alignment}
                 [{symbol}] Direction Changes (8m): {direction_changes}
-                [{symbol}] Close: {close:.6f}
-                [{symbol}] EMAs - Fast: {ema_fast:.6f}, Medium: {ema_medium:.6f}, Slow: {ema_slow:.6f}
+                [{symbol}] EMA Compression: {ema_compression:.6f}
+            """)
+
+            # Compare with current candle
+            current_momentum = smooth_changes_1m.rolling(3).sum().iloc[-1]
+            logging.info(f"""[{symbol}] Current vs Last Complete Candle:
+                [{symbol}] ATR% - Current: {current_atr:.4f}, Complete: {atr_pct:.4f}
+                [{symbol}] Momentum - Current: {current_momentum:.4f}, Complete: {short_momentum:.4f}
             """)
 
             # Regime detection with adaptive thresholds
-            # Calculate adaptive thresholds based on historical volatility
-            vol_threshold = max(1.05, baseline_volatility / recent_volatility * 1.05)  # Reduced from 1.2 to 1.05
-            momentum_threshold_1m = max(0.002, atr_pct * 0.05)  # Reduced from 0.005 to 0.002 and from 10% to 5%
-            momentum_threshold_3m = max(0.004, atr_pct * 0.1)   # Reduced from 0.01 to 0.004 and from 20% to 10%
+            vol_threshold = max(1.2, baseline_volatility / recent_volatility * 1.2)  # Good for crypto
+            momentum_threshold_1m = max(0.004, atr_pct * 0.12)  # Increased for crypto's rapid moves
+            momentum_threshold_3m = max(0.008, atr_pct * 0.20)  # Increased for medium-term momentum
 
-            # 1. Volatile: Adaptive volatility ratio OR strong momentum
-            if (vol_ratio > vol_threshold or
-                abs(short_momentum) > momentum_threshold_1m or
-                abs(medium_momentum) > momentum_threshold_3m or
-                atr_pct > 0.3):  # Added direct ATR check
+            # Adjust thresholds if warnings are active
+            if volatility_warning:
+                vol_threshold *= 0.85  # More sensitive to volatility
+                momentum_threshold_1m *= 1.5  # Increased from 1.3 for crypto
+                momentum_threshold_3m *= 1.5  # Increased from 1.3 for crypto
+
+            if reversal_warning:
+                momentum_threshold_1m *= 1.6  # Increased from 1.4 for crypto
+                momentum_threshold_3m *= 1.6  # Increased from 1.4 for crypto
+
+            # 1. Volatile regime detection - High volatility or strong momentum
+            if (
+                (vol_ratio > vol_threshold and current_volume > avg_volume * 1.8) or  # Increased volume req
+                (abs(short_momentum) > momentum_threshold_1m and
+                 abs(medium_momentum) > momentum_threshold_3m * 0.8) or  # Increased confirmation
+                atr_pct > 0.5 or  # Increased from 0.4 for crypto's higher volatility
+                (current_atr > atr_pct * 2.0 and current_volume > avg_volume * 1.8)  # Stricter conditions
+            ):
                 return 'volatile'
 
-            # 2. Trending: Strong trend alignment with momentum confirmation
-            elif ((trend_alignment != 0 and abs(medium_momentum) > momentum_threshold_3m * 0.3) or  # Reduced from 0.5
-                  (close < ema_fast < ema_medium < ema_slow and short_momentum < -momentum_threshold_1m * 0.2) or  # Reduced from 0.3
-                  (close > ema_fast > ema_medium > ema_slow and short_momentum > momentum_threshold_1m * 0.2)):  # Reduced from 0.3
+            # 2. Trending regime detection - Strong trend with momentum and volume
+            elif (
+                # Trend alignment check (relaxed)
+                abs(trend_alignment) == 1 and
+                # Momentum check (reduced threshold)
+                abs(medium_momentum) > momentum_threshold_3m * 0.4 and  # Reduced from 0.6
+                (
+                    # Either strong volume with moderate EMA separation
+                    (current_volume > avg_volume * 1.3 and  # Reduced from 1.4
+                     ema_compression > 0.003) or  # Reduced from 0.0035
+                    # Or very strong momentum with minimal volume
+                    (abs(medium_momentum) > momentum_threshold_3m * 0.7 and
+                     current_volume > avg_volume * 1.2)
+                ) and
+                direction_changes <= 2  # Relaxed from 1
+            ):
                 return 'trending'
 
-            # 3. Ranging: Adaptive low momentum thresholds with trend check
-            elif (abs(medium_momentum) < momentum_threshold_3m * 0.3 and  # Increased from 0.2
-                  abs(short_momentum) < momentum_threshold_1m * 0.35 and  # Increased from 0.25
-                  (direction_changes >= 2 or  # Original condition
-                   (abs(close - ema_fast) / close < 0.001 and  # Price close to fast EMA
-                    abs(ema_fast - ema_medium) / close < 0.001)) and  # EMAs compressed
-                  abs(trend_alignment) <= 1 and  # Allow slight trend alignment
-                  vol_ratio < 1.05):  # Increased from 0.95
-                return 'ranging'
+            # 3. Normal regime detection - Stable market with clear structure
+            elif (
+                0.75 < vol_ratio < 1.25 and  # Widened for crypto's natural volatility
+                ema_compression > 0.0035 and  # Increased from 0.003
+                abs(short_momentum) < momentum_threshold_1m * 0.7 and  # Reduced from 0.8
+                abs(medium_momentum) < momentum_threshold_3m * 0.8 and  # Reduced from 0.9
+                direction_changes < 2 and  # Stricter requirement
+                0.7 < current_volume / avg_volume < 1.3  # Tightened volume range
+            ):
+                return 'normal'
 
-            # 4. Normal: Default state
-            return 'normal'
+            # All other conditions are considered ranging (default state)
+            return 'ranging'
 
         except Exception as e:
             logging.error(f"[{symbol}] Error in detect_market_regime: {e}")
             logging.error(f"[{symbol}] {traceback.format_exc()}")
-            return 'normal'  # Default to normal regime on error
+            return 'ranging'  # Default to ranging on error
 
     def _get_regime_adjusted_weights(self, market_regime: str, symbol: str, current_volatility: float, price_momentum: float, signal_data: Dict[str, Any]) -> Dict[str, float]:
         """Get weights adjusted for market regime and current market conditions."""
@@ -569,28 +653,36 @@ class SignalGenerator:
 
         # Apply regime-specific adjustments
         if market_regime == "volatile":
-            weights["MACD"] *= 0.7        # Reduce momentum
-            weights["EMA_Fast"] *= 1.4    # Quick price action
-            weights["EMA_Medium"] *= 1.2  # Trend awareness
-            weights["ATR"] *= 1.5         # Volatility awareness
+            weights["MACD"] *= 0.9        # Increased from 0.7 for stronger momentum influence
+            weights["EMA_Fast"] *= 1.2    # Reduced from 1.3 to avoid trend bias
+            weights["EMA_Medium"] *= 1.1  # Reduced from 1.2
+            weights["ATR"] *= 1.4         # Reduced from 1.6 for less volatility focus
+
+            # Additional volatility adjustments
+            if current_volatility > 3.0:  # Extra high volatility
+                weights["MACD"] *= 1.3    # Further increase MACD importance
+                weights["ATR"] *= 1.1     # Slight increase in volatility awareness
+                weights["EMA_Fast"] *= 0.9  # Reduce fast EMA influence
 
         elif market_regime == "ranging":
-            weights["MACD"] *= 0.6        # Minimal momentum
-            weights["EMA_Fast"] *= 1.3    # Price action
-            weights["EMA_Medium"] *= 1.2  # Moderate trend
-            weights["ATR"] *= 1.4         # Volatility awareness
+            weights["MACD"] *= 0.5        # Reduced momentum importance
+            weights["EMA_Fast"] *= 1.4    # Increased for price action
+            weights["EMA_Medium"] *= 1.3  # Increased for trend structure
+            weights["ATR"] *= 1.5         # Increased for volatility awareness
 
         elif market_regime == "trending":
-            weights["MACD"] *= 1.2        # Momentum importance
-            weights["EMA_Fast"] *= 1.2    # Price action
-            weights["EMA_Medium"] *= 1.3  # Trend confirmation
-            weights["ATR"] *= 0.9         # Less volatility focus
+            weights["MACD"] *= 1.3        # Increased momentum importance
+            weights["EMA_Fast"] *= 1.1    # Slightly reduced for less noise
+            weights["EMA_Medium"] *= 1.4  # Increased for stronger trend following
+            weights["ATR"] *= 0.8         # Reduced volatility focus
 
-            # Simple trend alignment check
-            if ((price_momentum < 0 and signal_data["MACD"] < signal_data["MACD_Signal"]) or
-                (price_momentum > 0 and signal_data["MACD"] > signal_data["MACD_Signal"])):
-                weights["MACD"] *= 1.2
-                weights["EMA_Medium"] *= 1.1
+            # Enhanced trend alignment check with price levels
+            current_close = signal_data["Close"]
+            current_ema_fast = signal_data["EMA_Fast"]
+            if ((price_momentum < 0 and signal_data["MACD"] < signal_data["MACD_Signal"] and current_close < current_ema_fast) or
+                (price_momentum > 0 and signal_data["MACD"] > signal_data["MACD_Signal"] and current_close > current_ema_fast)):
+                weights["MACD"] *= 1.3
+                weights["EMA_Medium"] *= 1.2
 
         else:  # normal regime
             if current_volatility > 1.5:
@@ -665,159 +757,116 @@ class SignalGenerator:
             logging.error(f"[{symbol}] {traceback.format_exc()}")
 
     def _calculate_weighted_signal(self, data: Dict[str, Any], symbol: str, weights: Dict[str, float]) -> float:
-        """
-        Calculate weighted trading signal optimized for minute-scale crypto scalping.
-        Returns a value between -1 (strong sell) and 1 (strong buy).
-        """
         try:
-            # Get trend quality from signal data
             trend_quality = data['trend_quality']
 
-            # 1. Price Momentum Component
-            price_momentum = (data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"]
-            price_momentum = max(min(price_momentum, 1), -1)  # Bound between -1 and 1
+            # Enhanced trend quality factors
+            strong_trend = trend_quality > 0.7
+            weak_trend = trend_quality < 0.3
 
-            # 2. MACD Component
+            # Price Momentum with enhanced breakout detection
+            price_momentum = (data["Close"] - data["EMA_Fast"]) / data["EMA_Fast"]
+
+            # Enhanced momentum for failed breakouts with trend consideration
+            if abs(price_momentum) > 0.001:
+                last_three_closes = data.get("last_three_closes", [])
+                if len(last_three_closes) >= 3:
+                    last_three_volumes = data.get("last_three_volumes", [])
+                    # Failed breakout detection with volume confirmation
+                    if (price_momentum < 0 and
+                        last_three_closes[1] > last_three_closes[0] and
+                        last_three_closes[2] < last_three_closes[1] and
+                        last_three_volumes[2] < last_three_volumes[1]):
+                        momentum_multiplier = 1.2
+                        if weak_trend:  # Stronger adjustment in weak trends
+                            momentum_multiplier = 1.4
+                        price_momentum *= momentum_multiplier
+                    elif (price_momentum > 0 and
+                          last_three_closes[1] < last_three_closes[0] and
+                          last_three_closes[2] > last_three_closes[1] and
+                          last_three_volumes[2] < last_three_volumes[1]):
+                        momentum_multiplier = 1.2
+                        if weak_trend:  # Stronger adjustment in weak trends
+                            momentum_multiplier = 1.4
+                        price_momentum *= momentum_multiplier
+
+            # Ensure momentum sign matches price movement direction
+            price_direction = np.sign(data["Close"] - data["EMA_Fast"])
+            if abs(price_momentum) > 0:
+                price_momentum = abs(price_momentum) * price_direction
+
+            price_momentum = max(min(price_momentum, 1), -1)
+
+            # MACD with trend quality consideration
             macd_diff = data["MACD"] - data["MACD_Signal"]
-            # Use MACD range for normalization, using half range for better sensitivity
             macd_range = data["MACD_Range"]
             if macd_range > 0:
-                macd_signal = macd_diff / (macd_range * 0.5)  # Use half range for stronger signals
+                macd_signal = macd_diff / (macd_range * 0.5)
+                if strong_trend and np.sign(macd_signal) == np.sign(price_momentum):
+                    macd_signal *= 1.3  # Stronger boost in strong trends
+                elif weak_trend:
+                    macd_signal *= 0.7  # Reduce MACD influence in weak trends
             else:
                 macd_signal = 0
-            macd_signal = max(min(macd_signal, 1), -1)  # Bound between -1 and 1
+            macd_signal = max(min(macd_signal, 1), -1)
 
-            # Log MACD details for analysis
-            logging.info(f"[{symbol}] MACD Details - Diff: {macd_diff:.6f}, Range: {macd_range:.6f}, Signal: {macd_signal:.3f}")
-
-            # 3. EMA Trend Component
+            # Enhanced EMA trend component with momentum alignment
             if data["Close"] < data["EMA_Fast"] < data["EMA_Medium"] < data["EMA_Slow"]:
-                ema_trend = -1.0  # Perfect bearish alignment
+                ema_trend = -1.0
+                if strong_trend and np.sign(macd_signal) < 0:  # Only boost if MACD aligns
+                    ema_trend *= 1.2
             elif data["Close"] > data["EMA_Fast"] > data["EMA_Medium"] > data["EMA_Slow"]:
-                ema_trend = 1.0   # Perfect bullish alignment
-            elif data["Close"] < data["EMA_Fast"] < data["EMA_Medium"]:
-                ema_diff = data["Close"] - data["EMA_Fast"]
-                ema_trend = max(ema_diff / (data["ATR"] * 2), -1)  # Scale by 2 ATR
-            elif data["Close"] > data["EMA_Fast"] > data["EMA_Medium"]:
-                ema_diff = data["Close"] - data["EMA_Fast"]
-                ema_trend = min(ema_diff / (data["ATR"] * 2), 1)  # Scale by 2 ATR
+                ema_trend = 1.0
+                if strong_trend and np.sign(macd_signal) > 0:  # Only boost if MACD aligns
+                    ema_trend *= 1.2
             else:
-                ema_diff = data["Close"] - data["EMA_Medium"]
-                ema_trend = ema_diff / (data["ATR"] * 2)  # Scale by 2 ATR
-            ema_trend = max(min(ema_trend, 1), -1)  # Ensure bounds
+                ema_diff = data["Close"] - data["EMA_Fast"]
+                ema_trend = ema_diff / (data["ATR"] * 2)
+                # Reduce trend influence when MACD disagrees
+                if np.sign(ema_trend) != np.sign(macd_signal):
+                    ema_trend *= 0.7
+            ema_trend = max(min(ema_trend, 1), -1)
 
-            # First check for perfect technical alignment with meaningful separation
-            if abs(ema_trend) == 1.0 and trend_quality >= 0.8:  # At least 80% of minimum separation
-                # Adjust transfer percentages based on trend quality
-                separation_factor = min(1.0, trend_quality)
+            # Volatility component with trend consideration
+            volatility_signal = min(data["ATR"] / data["Close"] * 3.2, 0.35)
+            if strong_trend:
+                volatility_signal *= 0.7  # Reduce volatility impact in strong trends
+            elif weak_trend:
+                volatility_signal *= 1.3  # Increase volatility awareness in weak trends
 
-                # Transfer from EMA_Fast to EMA_Medium
-                fast_transfer = weights["EMA_Fast"] * (0.9 * separation_factor)
-                weights["EMA_Fast"] *= (1 - 0.9 * separation_factor)
-                weights["EMA_Medium"] += fast_transfer
+            # Get prediction if available
+            prediction = data.get("Prediction", 0)
 
-                # Reduce ATR influence proportionally to separation
-                if weights["ATR"] > 0.1:
-                    atr_transfer = (weights["ATR"] - 0.1) * separation_factor
-                    weights["ATR"] -= atr_transfer
-                    weights["EMA_Medium"] += atr_transfer
-
-                # If prediction aligns with perfect trend, transfer from MACD instead
-                if "Prediction" in data and np.sign(data["Prediction"]) == np.sign(ema_trend):
-                    pred_strength = abs(data["Prediction"])
-                    pred_keep_pct = min(0.8, max(0.5, pred_strength * 0.7))
-
-                    # Transfer from MACD proportionally to separation
-                    macd_transfer = weights["MACD"] * (0.8 * separation_factor)
-                    weights["MACD"] *= (1 - 0.8 * separation_factor)
-                    weights["EMA_Medium"] += macd_transfer
-
-                    logging.info(f"[{symbol}] Reduced MACD weight with separation factor {separation_factor:.3f}")
-                    logging.info(f"[{symbol}] New MACD weight: {weights['MACD']:.3f}")
-                    logging.info(f"[{symbol}] Added to EMA_Medium weight: +{macd_transfer:.3f}")
-
-                    weights["Prediction"] *= pred_keep_pct
-                    weights["EMA_Medium"] += weights["Prediction"] * (1 - pred_keep_pct)
-
-                else:  # Prediction contradicts or doesn't exist
-                    pred_transfer = weights["Prediction"] * (0.95 * separation_factor)
-                    weights["Prediction"] *= (1 - 0.95 * separation_factor)
-                    weights["EMA_Medium"] += pred_transfer
-
-                    macd_transfer = weights["MACD"] * (0.8 * separation_factor)
-                    weights["MACD"] *= (1 - 0.8 * separation_factor)
-                    weights["EMA_Medium"] += macd_transfer
-
-                logging.info(f"[{symbol}] Adjusted weights for perfect trend signal (separation factor: {separation_factor:.3f})")
-                logging.info(f"[{symbol}] New prediction weight: {weights['Prediction']:.3f}")
-                logging.info(f"[{symbol}] New EMA_Medium weight: {weights['EMA_Medium']:.3f}")
-                logging.info(f"[{symbol}] New EMA_Fast weight: {weights['EMA_Fast']:.3f}")
-                logging.info(f"[{symbol}] New ATR weight: {weights['ATR']:.3f}")
-
-            # Then check for strong trend signals with meaningful separation
-            elif abs(ema_trend) > 0.5 and trend_quality >= 0.5:  # At least 50% of minimum separation
-                # Calculate transfer percentage based on trend strength
-                trend_strength = abs(ema_trend)
-                # For very strong trends (> 0.8), transfer up to 85%
-                # For moderate trends (> 0.5), transfer minimum 65%
-                transfer_pct = min(0.85, max(0.65, trend_strength * 0.8))
-
-                # If MACD is weak, transfer more of its weight
-                if abs(macd_signal) < 0.1:
-                    macd_transfer = weights["MACD"] * 0.6  # Transfer 60% of MACD weight (up from 40%)
-                    weights["MACD"] *= 0.4
-                    weights["EMA_Medium"] += macd_transfer
-
-                    logging.info(f"[{symbol}] Reduced MACD weight due to weak signal")
-                    logging.info(f"[{symbol}] New MACD weight: {weights['MACD']:.3f}")
-                    logging.info(f"[{symbol}] Added to EMA_Medium weight: +{macd_transfer:.3f}")
-
-                # If prediction contradicts strong trend and is weak (< 0.2), transfer more weight
-                if "Prediction" in data and np.sign(data["Prediction"]) != np.sign(ema_trend):
-                    pred_strength = abs(data["Prediction"])
-                    if pred_strength < 0.2:  # Weak contradicting prediction
-                        transfer_pct = min(0.9, transfer_pct + 0.15)  # Boost transfer percentage
-
-                    pred_transfer = weights["Prediction"] * transfer_pct
-                    weights["Prediction"] *= (1 - transfer_pct)
-                    weights["EMA_Medium"] += pred_transfer
-
-                    logging.info(f"[{symbol}] Adjusted weights for strong trend signal")
-                    logging.info(f"[{symbol}] Trend strength: {trend_strength:.3f}, Transfer percentage: {transfer_pct:.1%}")
-                    logging.info(f"[{symbol}] Prediction strength: {pred_strength:.3f}")
-                    logging.info(f"[{symbol}] New prediction weight: {weights['Prediction']:.3f}")
-                    logging.info(f"[{symbol}] New EMA_Medium weight: {weights['EMA_Medium']:.3f}")
-
-            # 4. Volatility Component (normalized to positive range [0, 0.3])
-            volatility_signal = min(data["ATR"] / data["Close"] * 3, 0.3)  # Increased range and sensitivity
-
-            # 5. Normalize prediction if available
-            prediction = 0
-            if "Prediction" in data:
-                prediction = data["Prediction"]  # Already in [-1, 1] range
-                logging.info(f"[{symbol}] Prediction: {prediction:.3f}")
-
-            # 6. Calculate weighted signal
+            # Calculate weighted signal with enhanced trend quality influence
             weighted_signal = (
-                price_momentum * weights["EMA_Fast"] +
-                macd_signal * weights["MACD"] +
-                ema_trend * weights["EMA_Medium"] +
-                volatility_signal * weights["ATR"] +
-                prediction * weights["Prediction"]
+                price_momentum * weights["EMA_Fast"] * (1 + trend_quality * 0.2) +  # Increased from 0.1
+                macd_signal * weights["MACD"] * (1 + trend_quality * 0.15) +        # Added trend quality factor
+                ema_trend * weights["EMA_Medium"] * (1 + trend_quality * 0.25) +    # Increased from 0.15
+                volatility_signal * weights["ATR"] * (1 - trend_quality * 0.3) +    # Increased from 0.2
+                prediction * weights["Prediction"]                                   # Prediction component
             )
 
-            # 7. Bound final signal
+            # Enhanced signal alignment boost
+            components = [price_momentum, macd_signal, ema_trend]
+            if all(abs(c) > 0.2 for c in components) and all(np.sign(c) == np.sign(components[0]) for c in components):
+                alignment_boost = 1.2 * (1 + trend_quality * 0.2)  # Increased from 1.1 and 0.1
+                # Add prediction to alignment check if it exists and is significant
+                if abs(prediction) > 0.2 and np.sign(prediction) == np.sign(components[0]):
+                    alignment_boost *= 1.1  # Additional 10% boost for aligned prediction
+                weighted_signal *= alignment_boost
+
             final_signal = max(min(weighted_signal, 1.0), -1.0)
 
-            # 8. Log components and weights
-            logging.info(f"[{symbol}] Signal Components")
-            logging.info(f"[{symbol}] Price Momentum ({weights['EMA_Fast']:.2f}): {price_momentum:.3f}")
-            logging.info(f"[{symbol}] MACD ({weights['MACD']:.2f}): {macd_signal:.3f}")
-            logging.info(f"[{symbol}] EMA Trend ({weights['EMA_Medium']:.2f}): {ema_trend:.3f}")
-            logging.info(f"[{symbol}] Volatility ({weights['ATR']:.2f}): {volatility_signal:.3f}")
-            logging.info(f"[{symbol}] Prediction ({weights['Prediction']:.2f}): {prediction:.3f}")
-            logging.info(f"[{symbol}] Final: {final_signal:.3f}")
-            logging.info(f"[{symbol}] Price: {data['Close']:.2f}")
+            # Enhanced logging
+            logging.info(f"""[{symbol}] Signal Analysis:
+                [{symbol}] Trend Quality: {trend_quality:.3f} ({'Strong' if strong_trend else 'Weak' if weak_trend else 'Normal'})
+                [{symbol}] Price Momentum: {price_momentum:.3f} (Weight: {weights['EMA_Fast']:.2f})
+                [{symbol}] MACD Signal: {macd_signal:.3f} (Weight: {weights['MACD']:.2f})
+                [{symbol}] EMA Trend: {ema_trend:.3f} (Weight: {weights['EMA_Medium']:.2f})
+                [{symbol}] Volatility: {volatility_signal:.3f} (Weight: {weights['ATR']:.2f})
+                [{symbol}] Prediction: {prediction:.3f} (Weight: {weights['Prediction']:.2f})
+                [{symbol}] Final Signal: {final_signal:.3f}
+            """)
 
             return final_signal
 
@@ -879,13 +928,14 @@ class SignalGenerator:
     def _calculate_trend_quality(self, df_3m: pd.DataFrame, df_1m: pd.DataFrame) -> float:
         """Calculate trend quality based on EMA separations and trend structure, optimized for DCA grid trading."""
         try:
-            close = df_3m['close'].iloc[-1]
-            ema_fast = df_3m['ema_fast'].iloc[-1]
-            ema_medium = df_3m['ema_medium'].iloc[-1]
-            ema_slow = df_3m['ema_slow'].iloc[-1]
+            # Use completed candles
+            close = df_3m['close'].iloc[-2]
+            ema_fast = df_3m['ema_fast'].iloc[-2]
+            ema_medium = df_3m['ema_medium'].iloc[-2]
+            ema_slow = df_3m['ema_slow'].iloc[-2]
 
-            # Calculate EMA separations using ATR for normalization
-            atr = df_1m['atr'].iloc[-1]
+            # Calculate EMA separations using ATR for normalization (use completed candle)
+            atr = df_1m['atr'].iloc[-2]
             if atr > 0:
                 ema_fast_med_sep = abs(ema_fast - ema_medium) / atr
                 ema_med_slow_sep = abs(ema_medium - ema_slow) / atr
