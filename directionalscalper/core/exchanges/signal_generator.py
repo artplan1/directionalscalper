@@ -1,3 +1,4 @@
+import json
 from typing import Dict, Tuple, Any, TYPE_CHECKING
 from logging import Logger as LoggerType
 
@@ -403,7 +404,7 @@ class SignalGenerator:
 
             del df_1m, df_3m
 
-            logging.info(f"New signal: {new_signal}")
+            logger.info(f"[{symbol}] signal: {json.dumps(signal_data)}")
 
             return new_signal
         except Exception as e:
