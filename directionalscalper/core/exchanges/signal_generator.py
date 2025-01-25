@@ -1,32 +1,33 @@
-from typing import Dict, Tuple, Union, Mapping, Any, TYPE_CHECKING
+from typing import Dict, Tuple, Any, TYPE_CHECKING
+from logging import Logger as LoggerType
 
-from ..strategies.logger import Logger
+from .signal_logger import SignalLogger
+
 
 if TYPE_CHECKING:
     from directionalscalper.core.exchanges.exchange import Exchange
 
-import logging
 import time
 from ta.momentum import RSIIndicator
-from ta.trend import MACD, EMAIndicator, SMAIndicator
+from ta.trend import MACD, EMAIndicator
 from ta.volatility import AverageTrueRange
 import pandas as pd
 import numpy as np
-import json
 import traceback
-
-logging = Logger(logger_name="SignalGenerator", filename="SignalGenerator.log", stream=True)
 
 class SignalGenerator:
     def __init__(self, exchange: "Exchange"):
         self.exchange = exchange
+        self.signal_logger = SignalLogger()
 
-    def generate_l_signals_from_data(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
+    def generate(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         """Generate trading signals using balanced approach between old and new implementations."""
         try:
+            logger = self.signal_logger.get_logger(symbol)
+
             # Convert list to DataFrame if needed
             if isinstance(ohlcv_1m, list):
-                logging.info(f"[{symbol}] Converting 1m data to DataFrame")
+                logger.info("Converting 1m data to DataFrame")
 
                 df_1m = pd.DataFrame(ohlcv_1m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df_1m['timestamp'] = pd.to_datetime(df_1m['timestamp'], unit='ms')
@@ -35,7 +36,7 @@ class SignalGenerator:
                 df_1m = ohlcv_1m.copy()
 
             if isinstance(ohlcv_3m, list):
-                logging.info(f"[{symbol}] Converting 3m data to DataFrame")
+                logger.info("Converting 3m data to DataFrame")
 
                 df_3m = pd.DataFrame(ohlcv_3m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df_3m['timestamp'] = pd.to_datetime(df_3m['timestamp'], unit='ms')
@@ -43,16 +44,13 @@ class SignalGenerator:
             else:
                 df_3m = ohlcv_3m.copy()
 
-            logging.info(f"[{symbol}] Data structure after conversion:")
-            logging.info(f"1m columns: {df_1m.columns.tolist()}")
-            logging.info(f"1m index type: {type(df_1m.index)}")
-            logging.info(f"1m data shape: {df_1m.shape}, 3m data shape: {df_3m.shape}")
+            logger.info("Starting signal generation")
 
             # Log last 3 candles information
             try:
                 last_3_candles = df_1m[['open', 'high', 'low', 'close', 'volume']].tail(3)
                 if len(last_3_candles) > 0:
-                    logging.info(f"\n[{symbol}] Last 3 candles (1m):")
+                    logger.info("Last 3 candles (1m):")
                     prev_close = None
                     for idx, candle in last_3_candles.iterrows():
                         try:
@@ -83,31 +81,31 @@ class SignalGenerator:
                             except:
                                 timestamp = str(idx)
 
-                            logging.info(f"[{symbol}] {timestamp} - {direction}{vol_note} | O: {candle['open']:.4f} H: {candle['high']:.4f} L: {candle['low']:.4f} C: {candle['close']:.4f} | Body/Range: {body_to_range_ratio:.1f}%{change_str} | Vol: {candle['volume']:.2f}")
+                            logger.info(f"{timestamp} - {direction}{vol_note} | O: {candle['open']:.4f} H: {candle['high']:.4f} L: {candle['low']:.4f} C: {candle['close']:.4f} | Body/Range: {body_to_range_ratio:.1f}%{change_str} | Vol: {candle['volume']:.2f}")
                             prev_close = candle['close']
                         except Exception as e:
-                            logging.error(f"[{symbol}] Error processing candle at {idx}: {str(e)}")
+                            logger.error(f"Error processing candle at {idx}: {str(e)}")
                 else:
-                    logging.warning(f"[{symbol}] No recent candles available for analysis")
+                    logger.warning("No recent candles available for analysis")
             except Exception as e:
-                logging.error(f"[{symbol}] Error analyzing recent candles: {str(e)}")
+                logger.error(f"Error analyzing recent candles: {str(e)}")
 
             # Calculate indicators
             try:
-                logging.info(f"[{symbol}] Starting indicator calculations")
+                logger.info("Starting indicator calculations")
 
                 # Calculate indicators
                 df_1m = self._calculate_indicators(df_1m)
                 df_3m = self.calculate_trend(df_3m)
 
                 try:
-                    logging.info(f"[{symbol}] 3m indicators calculated successfully")
-                    logging.info(f"[{symbol}] EMA ranges - Fast: {df_3m['ema_fast'].min():.4f} to {df_3m['ema_fast'].max():.4f}")
-                    logging.info(f"[{symbol}] EMA ranges - Medium: {df_3m['ema_medium'].min():.4f} to {df_3m['ema_medium'].max():.4f}")
-                    logging.info(f"[{symbol}] EMA ranges - Slow: {df_3m['ema_slow'].min():.4f} to {df_3m['ema_slow'].max():.4f}")
-                    logging.info(f"[{symbol}] MACD range: {df_3m['macd'].min():.4f} to {df_3m['macd'].max():.4f}")
+                    logger.info("3m indicators calculated successfully")
+                    logger.info(f"EMA ranges - Fast: {df_3m['ema_fast'].min():.4f} to {df_3m['ema_fast'].max():.4f}")
+                    logger.info(f"EMA ranges - Medium: {df_3m['ema_medium'].min():.4f} to {df_3m['ema_medium'].max():.4f}")
+                    logger.info(f"EMA ranges - Slow: {df_3m['ema_slow'].min():.4f} to {df_3m['ema_slow'].max():.4f}")
+                    logger.info(f"MACD range: {df_3m['macd'].min():.4f} to {df_3m['macd'].max():.4f}")
                 except Exception as e:
-                    logging.error(f"[{symbol}] 3m indicator calculation failed: {e}")
+                    logger.error(f"3m indicator calculation failed: {e}")
                     return 'neutral'
 
                 # Verify no NaN values in critical columns
@@ -122,48 +120,42 @@ class SignalGenerator:
                 nan_3m = latest_3m.isna().sum()
 
                 if nan_1m > 0 or nan_3m > 0:
-                    logging.error(f"[{symbol}] NaN values in latest bar - 1m: {nan_1m}, 3m: {nan_3m}")
-                    logging.error(f"[{symbol}] 1m values: {latest_1m.to_dict()}")
-                    logging.error(f"[{symbol}] 3m values: {latest_3m.to_dict()}")
+                    logger.error(f"NaN values in latest bar - 1m: {nan_1m}, 3m: {nan_3m}")
+                    logger.error(f"1m values: {latest_1m.to_dict()}")
+                    logger.error(f"3m values: {latest_3m.to_dict()}")
 
                     # Log the last few rows of price data
-                    logging.error(f"[{symbol}] Last 5 rows of 1m price data:")
-                    logging.error(df_1m[['open', 'high', 'low', 'close']].tail().to_string())
+                    logger.error("Last 5 rows of 1m price data:")
+                    logger.error(df_1m[['open', 'high', 'low', 'close']].tail().to_string())
                     return 'neutral'
 
-                logging.info(f"[{symbol}] All indicators calculated successfully")
+                logger.info("All indicators calculated successfully")
 
             except Exception as e:
-                logging.error(f"[{symbol}] Error calculating indicators: {e}")
-                logging.error(f"[{symbol}] {traceback.format_exc()}")
+                logger.error(f"Error calculating indicators: {e}")
+                logger.error(traceback.format_exc())
                 return 'neutral'
 
             # Detect trend
-            is_strong_uptrend, is_strong_downtrend = self.detect_trend(df_3m)
+            is_strong_uptrend, is_strong_downtrend = self.detect_trend(df_3m, logger=logger)
 
-            logging.info(f"[{symbol}] 3m Trend Analysis:")
-            logging.info(f"[{symbol}] Close: {df_3m['close'].iloc[-1]:.4f}")
-            logging.info(f"[{symbol}] EMA Fast: {df_3m['ema_fast'].iloc[-1]:.4f}")
-            logging.info(f"[{symbol}] EMA Medium: {df_3m['ema_medium'].iloc[-1]:.4f}")
-            logging.info(f"[{symbol}] EMA Slow: {df_3m['ema_slow'].iloc[-1]:.4f}")
-            logging.info(f"[{symbol}] MACD: {df_3m['macd'].iloc[-1]:.4f}")
-            logging.info(f"[{symbol}] MACD Signal: {df_3m['macd_signal'].iloc[-1]:.4f}")
-            logging.info(f"[{symbol}] Strong Uptrend: {is_strong_uptrend}")
-            logging.info(f"[{symbol}] Strong Downtrend: {is_strong_downtrend}")
+            logger.info("3m Trend Analysis:")
+            logger.info(f"Strong Uptrend: {is_strong_uptrend}")
+            logger.info(f"Strong Downtrend: {is_strong_downtrend}")
 
             # Calculate market regime from 1m data
-            market_regime = self._detect_market_regime(df_1m, df_3m, symbol)
+            market_regime = self._detect_market_regime(df_1m, df_3m, symbol, logger=logger)
             # logging.info(f"[{symbol}] Detecting market regime - atr_pct: {df_1m['atr_pct'].iloc[-1]}")
 
-            logging.info(f"[{symbol}] Market Regime: {market_regime}")
+            logger.info(f"Market Regime: {market_regime}")
             latest_atr_pct = df_1m['atr_pct'].iloc[-1]
-            logging.info(f"[{symbol}] ATR %: {latest_atr_pct:.4f}")
+            logger.info(f"ATR %: {latest_atr_pct:.4f}")
 
             # Calculate trend quality once
-            trend_quality = self._calculate_trend_quality(df_3m, df_1m)
+            trend_quality = self._calculate_trend_quality(df_3m, df_1m, logger=logger)
 
-            logging.info(f"[{symbol}] EMA Separations - Fast-Med: {abs(df_3m['ema_fast'].iloc[-1] - df_3m['ema_medium'].iloc[-1]) / df_3m['close'].iloc[-1]:.6f}, Med-Slow: {abs(df_3m['ema_medium'].iloc[-1] - df_3m['ema_slow'].iloc[-1]) / df_3m['close'].iloc[-1]:.6f}")
-            logging.info(f"[{symbol}] Trend Quality: {trend_quality:.3f}")
+            logger.info(f"EMA Separations - Fast-Med: {abs(df_3m['ema_fast'].iloc[-1] - df_3m['ema_medium'].iloc[-1]) / df_3m['close'].iloc[-1]:.6f}, Med-Slow: {abs(df_3m['ema_medium'].iloc[-1] - df_3m['ema_slow'].iloc[-1]) / df_3m['close'].iloc[-1]:.6f}")
+            logger.info(f"Trend Quality: {trend_quality:.3f}")
 
             # Prepare data for weighted signal calculation
             signal_data = {
@@ -182,10 +174,9 @@ class SignalGenerator:
             }
 
             # Log completed vs current candle for analysis
-            logging.info(f"""[{symbol}] Candle Analysis:
-                [{symbol}] Last Complete (3m) - Close: {df_3m['close'].iloc[-2]:.4f}, Volume: {df_3m['volume'].iloc[-2]:.2f}
-                [{symbol}] Current (3m) - Close: {df_3m['close'].iloc[-1]:.4f}, Volume: {df_3m['volume'].iloc[-1]:.2f}
-            """)
+            logger.info("Candle Analysis:")
+            logger.info(f"Last Complete (3m) - Close: {df_3m['close'].iloc[-2]:.4f}, Volume: {df_3m['volume'].iloc[-2]:.2f}")
+            logger.info(f"Current (3m) - Close: {df_3m['close'].iloc[-1]:.4f}, Volume: {df_3m['volume'].iloc[-1]:.2f}")
 
             # Calculate prediction if using nearest neighbor analysis
             if neighbors_count > 0:
@@ -239,29 +230,28 @@ class SignalGenerator:
             price_momentum = df_1m['close'].pct_change(3).iloc[-1]  # Simple 3-minute momentum
 
             # Get weights adjusted for regime and market conditions
-            weights = self._get_regime_adjusted_weights(market_regime, symbol, current_volatility, price_momentum, signal_data)
+            weights = self._get_regime_adjusted_weights(market_regime, symbol, current_volatility, price_momentum, signal_data, logger=logger)
 
             # Apply prediction weight adjustments for optimal conditions
-            weights = self._adjust_prediction_weights(df_1m, df_3m, weights)
+            weights = self._adjust_prediction_weights(df_1m, df_3m, weights, logger=logger)
 
             # Normalize weights to sum to 1
             total_weight = sum(weights.values())
             weights = {k: v / total_weight for k, v in weights.items()}
 
-            logging.info(f"""[{symbol}] Weight Distribution:
-                [{symbol}] Market Regime: {market_regime}
-                [{symbol}] MACD: {weights['MACD']:.3f}
-                [{symbol}] EMA Fast: {weights['EMA_Fast']:.3f}
-                [{symbol}] EMA Medium: {weights['EMA_Medium']:.3f}
-                [{symbol}] ATR: {weights['ATR']:.3f}
-                [{symbol}] Volatility: {current_volatility:.3f}%
-                [{symbol}] Price Momentum: {price_momentum:.4f}
-            """)
+            logger.info("Weight Distribution:")
+            logger.info(f"Market Regime: {market_regime}")
+            logger.info(f"MACD: {weights['MACD']:.3f}")
+            logger.info(f"EMA Fast: {weights['EMA_Fast']:.3f}")
+            logger.info(f"EMA Medium: {weights['EMA_Medium']:.3f}")
+            logger.info(f"ATR: {weights['ATR']:.3f}")
+            logger.info(f"Volatility: {current_volatility:.3f}%")
+            logger.info(f"Price Momentum: {price_momentum:.4f}")
 
             # Calculate weighted signal with adjusted weights
-            weighted_signal = self._calculate_weighted_signal(signal_data, symbol, weights)
+            weighted_signal = self._calculate_weighted_signal(signal_data, symbol, weights, logger=logger)
 
-            logging.info(f"[{symbol}] Weighted Signal: {weighted_signal:.3f}")
+            logger.info(f"Weighted Signal: {weighted_signal:.3f}")
 
             # More aggressive thresholds for minute-scale trading
             base_threshold = 0.12  # Reduced from 0.15 for faster response
@@ -293,14 +283,13 @@ class SignalGenerator:
                 else:
                     threshold = base_threshold
 
-            logging.info(f"""[{symbol}] Threshold Analysis:
-                [{symbol}] Base Threshold: {base_threshold:.3f}
-                [{symbol}] Market Regime: {market_regime}
-                [{symbol}] Current Volatility: {current_volatility:.4f}
-                [{symbol}] Recent Momentum: {recent_momentum:.4f}
-                [{symbol}] Final Threshold: {threshold:.3f}
-                [{symbol}] Weighted Signal: {weighted_signal:.3f}
-            """)
+            logger.info("Threshold Analysis:")
+            logger.info(f"Base Threshold: {base_threshold:.3f}")
+            logger.info(f"Market Regime: {market_regime}")
+            logger.info(f"Current Volatility: {current_volatility:.4f}")
+            logger.info(f"Recent Momentum: {recent_momentum:.4f}")
+            logger.info(f"Final Threshold: {threshold:.3f}")
+            logger.info(f"Weighted Signal: {weighted_signal:.3f}")
 
             if weighted_signal > threshold:
                 new_signal = "long"
@@ -309,7 +298,7 @@ class SignalGenerator:
             else:
                 new_signal = "neutral"
 
-            logging.info(f"[{symbol}] New Signal: {new_signal}")
+            logger.info(f"New Signal: {new_signal}")
 
             # Signal buffer logic with proper buffering
             current_time = time.time()
@@ -356,51 +345,55 @@ class SignalGenerator:
                 if market_regime == "volatile" and current_volatility > 2.0:
                     buffer_time *= 0.8  # Reduce buffer time in highly volatile conditions
 
-                logging.info(f"""[{symbol}] Buffer Analysis:
-                    [{symbol}] Base Buffer: 8.0s
-                    [{symbol}] Market Regime: {market_regime}
-                    [{symbol}] Trend Quality: {trend_quality:.3f}
-                    [{symbol}] Signal Strength: {signal_strength:.3f}
-                    [{symbol}] Final Buffer: {buffer_time:.1f}s
-                """)
+                logger.info("Buffer Analysis:")
+                logger.info("Base Buffer: 8.0s")
+                logger.info(f"Market Regime: {market_regime}")
+                logger.info(f"Trend Quality: {trend_quality:.3f}")
+                logger.info(f"Signal Strength: {signal_strength:.3f}")
+                logger.info(f"Final Buffer: {buffer_time:.1f}s")
+
+                signal_data['signal'] = new_signal
+                signal_data['buffer_time'] = buffer_time
+                signal_data['market_regime'] = market_regime
+                signal_data['trend_quality'] = trend_quality
+                signal_data['signal_strength'] = signal_strength
+                signal_data['threshold'] = threshold
 
                 if new_signal != 'neutral':  # Only buffer non-neutral signals
                     if new_signal == last_signal:  # Same signal
                         if time_since_last < buffer_time:
-                            logging.info(f"[{symbol}] Signal buffered (regime: {market_regime}, buffer: {buffer_time}s)")
-                            # Clean up memory before return
-                            del df_1m, df_3m
-                            return last_signal  # Return last signal during buffer period
+                            logger.info(f"Signal buffered (regime: {market_regime}, buffer: {buffer_time}s)")
+                            new_signal = last_signal  # Return last signal during buffer period
                         else:
                             # Update time but keep the signal
                             self.exchange.last_signal_time[symbol] = current_time
-                            del df_1m, df_3m
-                            return new_signal
+
                     else:  # Different signal
                         # Update both signal and time
                         self.exchange.last_signal[symbol] = new_signal
                         self.exchange.last_signal_time[symbol] = current_time
-                        del df_1m, df_3m
-                        return new_signal
+
                 else:  # Neutral signals aren't buffered
                     self.exchange.last_signal[symbol] = new_signal
                     self.exchange.last_signal_time[symbol] = current_time
-                    del df_1m, df_3m
-                    return new_signal
+
             else:  # First signal for this symbol
                 self.exchange.last_signal[symbol] = new_signal
                 self.exchange.last_signal_time[symbol] = current_time
-                del df_1m, df_3m
-                return new_signal
 
+            self.signal_logger.log_signal(symbol, signal_data, logger=logger)
+
+            del df_1m, df_3m
+
+            return new_signal
         except Exception as e:
-            logging.error(f"[{symbol}] Error in generate_l_signals_from_data: {e}")
-            logging.error(f"[{symbol}] {traceback.format_exc()}")
-            # Clean up memory even on error
-            try:
-                del df_1m, df_3m
-            except:
-                pass
+            logger.error(f"Error in generate_l_signals_from_data: {e}")
+            logger.error(f"{traceback.format_exc()}")
+            # # Clean up memory even on error
+            # try:
+            #     del df_1m, df_3m
+            # except:
+            #     pass
             return "neutral"
 
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -442,7 +435,7 @@ class SignalGenerator:
 
         return df
 
-    def detect_trend(self, df: pd.DataFrame) -> Tuple[bool, bool]:
+    def detect_trend(self, df: pd.DataFrame, logger: LoggerType) -> Tuple[bool, bool]:
         """Detect if a strong uptrend or downtrend exists with crypto-specific enhancements."""
         # Get latest completed candle values
         close = df['close'].iloc[-2]
@@ -482,12 +475,12 @@ class SignalGenerator:
         )
 
         # Log trend detection using completed candles
-        logging.info(f"Trend Detection (Using Completed Candles):")
-        logging.info(f"Close: {close:.4f}")
-        logging.info(f"EMAs - Fast: {ema_fast:.4f}, Medium: {ema_medium:.4f}, Slow: {ema_slow:.4f}")
-        logging.info(f"EMA Slopes - Fast: {ema_fast_slope:.6f}, Medium: {ema_medium_slope:.6f}")
-        logging.info(f"MACD: {macd:.6f}, Signal: {macd_signal:.6f}")
-        logging.info(f"EMA Compression: {ema_compression:.6f}")
+        logger.info("Trend Detection (Using Completed Candles):")
+        logger.info(f"Close: {close:.4f}")
+        logger.info(f"EMAs - Fast: {ema_fast:.4f}, Medium: {ema_medium:.4f}, Slow: {ema_slow:.4f}")
+        logger.info(f"EMA Slopes - Fast: {ema_fast_slope:.6f}, Medium: {ema_medium_slope:.6f}")
+        logger.info(f"MACD: {macd:.6f}, Signal: {macd_signal:.6f}")
+        logger.info(f"EMA Compression: {ema_compression:.6f}")
 
         # Ensure trends are mutually exclusive
         if is_uptrend and is_downtrend:
@@ -496,7 +489,7 @@ class SignalGenerator:
 
         return is_uptrend, is_downtrend
 
-    def _detect_market_regime(self, df: pd.DataFrame, df_3m: pd.DataFrame, symbol: str) -> str:
+    def _detect_market_regime(self, df: pd.DataFrame, df_3m: pd.DataFrame, symbol: str, logger: LoggerType) -> str:
         """Detect market regime based on volatility and momentum patterns."""
         try:
             # Base calculations on completed candles
@@ -518,7 +511,7 @@ class SignalGenerator:
             vol_spike_threshold = max(1.5, 1 + (atr_pct * 2.5))
             if current_atr > atr_pct * vol_spike_threshold:
                 volatility_warning = True
-                logging.info(f"[{symbol}] Volatility Warning: Current ATR {current_atr:.4f} vs Complete {atr_pct:.4f}")
+                logger.info(f"Volatility Warning: Current ATR {current_atr:.4f} vs Complete {atr_pct:.4f}")
 
             # Detect potential trend reversal with volume confirmation
             reversal_warning = False
@@ -526,7 +519,7 @@ class SignalGenerator:
             volume_surge = current_volume > avg_volume * 2.0  # Use current for immediate detection
             if price_change > atr_pct * 1.5 and volume_surge:
                 reversal_warning = True
-                logging.info(f"[{symbol}] Reversal Warning: Price change {price_change:.4f} with {current_volume/avg_volume:.1f}x volume")
+                logger.info(f"Reversal Warning: Price change {price_change:.4f} with {current_volume/avg_volume:.1f}x volume")
 
             # Price metrics from 3m data for trend consistency
             close = df_3m['close'].iloc[-2]
@@ -560,24 +553,22 @@ class SignalGenerator:
             )
 
             # Log all metrics for analysis
-            logging.info(f"""[{symbol}] Regime Detection Metrics (Using Completed Candles):
-                [{symbol}] Current ATR% (1m): {atr_pct:.4f}
-                [{symbol}] Recent Volatility (12m): {recent_volatility:.4f}
-                [{symbol}] Baseline Volatility (30m): {baseline_volatility:.4f}
-                [{symbol}] Volatility Ratio: {vol_ratio:.4f}
-                [{symbol}] Short Momentum (1m): {short_momentum:.4f}
-                [{symbol}] Medium Momentum (3m): {medium_momentum:.4f}
-                [{symbol}] Trend Alignment: {trend_alignment}
-                [{symbol}] Direction Changes (8m): {direction_changes}
-                [{symbol}] EMA Compression: {ema_compression:.6f}
-            """)
+            logger.info("Regime Detection Metrics (Using Completed Candles):")
+            logger.info(f"Current ATR% (1m): {atr_pct:.4f}")
+            logger.info(f"Recent Volatility (12m): {recent_volatility:.4f}")
+            logger.info(f"Baseline Volatility (30m): {baseline_volatility:.4f}")
+            logger.info(f"Volatility Ratio: {vol_ratio:.4f}")
+            logger.info(f"Short Momentum (1m): {short_momentum:.4f}")
+            logger.info(f"Medium Momentum (3m): {medium_momentum:.4f}")
+            logger.info(f"Trend Alignment: {trend_alignment}")
+            logger.info(f"Direction Changes (8m): {direction_changes}")
+            logger.info(f"EMA Compression: {ema_compression:.6f}")
 
             # Compare with current candle
             current_momentum = smooth_changes_1m.rolling(3).sum().iloc[-1]
-            logging.info(f"""[{symbol}] Current vs Last Complete Candle:
-                [{symbol}] ATR% - Current: {current_atr:.4f}, Complete: {atr_pct:.4f}
-                [{symbol}] Momentum - Current: {current_momentum:.4f}, Complete: {short_momentum:.4f}
-            """)
+            logger.info("Current vs Last Complete Candle:")
+            logger.info(f"ATR% - Current: {current_atr:.4f}, Complete: {atr_pct:.4f}")
+            logger.info(f"Momentum - Current: {current_momentum:.4f}, Complete: {short_momentum:.4f}")
 
             # Regime detection with adaptive thresholds
             vol_threshold = max(1.2, baseline_volatility / recent_volatility * 1.2)  # Good for crypto
@@ -618,10 +609,10 @@ class SignalGenerator:
                 direction_changes <= 2
             ):
                 # Log volume comparison for analysis
-                logging.info(f"[{symbol}] Volume Analysis for Trend Detection:")
-                logging.info(f"[{symbol}] Completed Volume: {completed_volume:.2f}")
-                logging.info(f"[{symbol}] Average Volume: {avg_volume:.2f}")
-                logging.info(f"[{symbol}] Volume Ratio: {completed_volume/avg_volume:.2f}x")
+                logger.info("Volume Analysis for Trend Detection:")
+                logger.info(f"Completed Volume: {completed_volume:.2f}")
+                logger.info(f"Average Volume: {avg_volume:.2f}")
+                logger.info(f"Volume Ratio: {completed_volume/avg_volume:.2f}x")
                 return 'trending'
 
             # 3. Normal regime detection - Use completed candle for stability
@@ -639,11 +630,11 @@ class SignalGenerator:
             return 'ranging'
 
         except Exception as e:
-            logging.error(f"[{symbol}] Error in detect_market_regime: {e}")
-            logging.error(f"[{symbol}] {traceback.format_exc()}")
+            logger.error(f"Error in detect_market_regime: {e}")
+            logger.error(f"{traceback.format_exc()}")
             return 'ranging'  # Default to ranging on error
 
-    def _get_regime_adjusted_weights(self, market_regime: str, symbol: str, current_volatility: float, price_momentum: float, signal_data: Dict[str, Any]) -> Dict[str, float]:
+    def _get_regime_adjusted_weights(self, market_regime: str, symbol: str, current_volatility: float, price_momentum: float, signal_data: Dict[str, Any], logger: LoggerType) -> Dict[str, float]:
         """Get weights adjusted for market regime and current market conditions."""
         # Base weights for signal generation
         weights = {
@@ -696,70 +687,18 @@ class SignalGenerator:
                 weights["ATR"] *= 1.1
                 weights["EMA_Fast"] *= 1.2
 
-        logging.info(f"""[{symbol}] Pre-normalized Weight Distribution:
-            [{symbol}] Market Regime: {market_regime}
-            [{symbol}] MACD: {weights['MACD']:.3f}
-            [{symbol}] EMA Fast: {weights['EMA_Fast']:.3f}
-            [{symbol}] EMA Medium: {weights['EMA_Medium']:.3f}
-            [{symbol}] ATR: {weights['ATR']:.3f}
-            [{symbol}] Volatility: {current_volatility:.3f}%
-            [{symbol}] Price Momentum: {price_momentum:.4f}
-        """)
+        logger.info("Pre-normalized Weight Distribution:")
+        logger.info(f"Market Regime: {market_regime}")
+        logger.info(f"MACD: {weights['MACD']:.3f}")
+        logger.info(f"EMA Fast: {weights['EMA_Fast']:.3f}")
+        logger.info(f"EMA Medium: {weights['EMA_Medium']:.3f}")
+        logger.info(f"ATR: {weights['ATR']:.3f}")
+        logger.info(f"Volatility: {current_volatility:.3f}%")
+        logger.info(f"Price Momentum: {price_momentum:.4f}")
 
         return weights
 
-    def _log_signal_components(self, symbol: str, components: Mapping[str, Union[float, Dict[str, float]]], weighted_signal: float, final_signal: float) -> None:
-        """Enhanced logging of signal components and final results."""
-        try:
-            logging.info(f"[{symbol}] {'='*20} Signal Analysis {'='*20}")
-
-            # Log raw values first
-            raw_values = components.get("Raw_Values", {})
-            if isinstance(raw_values, dict):  # Ensure raw_values is a dictionary
-                logging.info(f"[{symbol}] Raw Values:")
-                for name, value in raw_values.items():
-                    if isinstance(value, (int, float)):  # Ensure value is numeric
-                        logging.info(f"[{symbol}] {name:15}: {value:>8.4f}")
-                components_without_raw = {k: v for k, v in components.items() if k != "Raw_Values"}
-            else:
-                components_without_raw = components
-
-            # Log weighted components
-            logging.info(f"[{symbol}] Weighted Components:")
-            for component, value in components_without_raw.items():
-                if isinstance(value, (int, float)):  # Ensure value is numeric
-                    arrow = "↑" if value > 0 else "↓" if value < 0 else "→"
-                    strength = abs(value) / 0.5 * 100  # Normalize to percentage
-                    logging.info(f"[{symbol}] {component:15}: {value:>8.4f} {arrow} {strength:>5.1f}%")
-
-            # Log signal progression
-            logging.info(f"[{symbol}] Signal Progression:")
-            logging.info(f"[{symbol}] {'Raw Weighted':15}: {weighted_signal:>8.4f}")
-            logging.info(f"[{symbol}] {'Final Signal':15}: {final_signal:>8.4f}")
-
-            # Log signal interpretation using consistent thresholds
-            signal_strength = abs(final_signal)
-            if signal_strength > 0.3:
-                strength_desc = "Strong"
-            elif signal_strength > 0.2:
-                strength_desc = "Moderate"
-            elif signal_strength > 0.1:
-                strength_desc = "Weak"
-            else:
-                strength_desc = "Neutral"
-
-            direction = "LONG" if final_signal > 0 else "SHORT" if final_signal < 0 else "NEUTRAL"
-            if direction != "NEUTRAL":
-                logging.info(f"[{symbol}] Signal Interpretation: {strength_desc} {direction}")
-            else:
-                logging.info(f"[{symbol}] Signal Interpretation: NEUTRAL")
-            logging.info(f"[{symbol}] {'='*50}")
-
-        except Exception as e:
-            logging.error(f"[{symbol}] Error in _log_signal_components: {e}")
-            logging.error(f"[{symbol}] {traceback.format_exc()}")
-
-    def _calculate_weighted_signal(self, data: Dict[str, Any], symbol: str, weights: Dict[str, float]) -> float:
+    def _calculate_weighted_signal(self, data: Dict[str, Any], symbol: str, weights: Dict[str, float], logger: LoggerType) -> float:
         try:
             trend_quality = data['trend_quality']
 
@@ -861,20 +800,19 @@ class SignalGenerator:
             final_signal = max(min(weighted_signal, 1.0), -1.0)
 
             # Enhanced logging
-            logging.info(f"""[{symbol}] Signal Analysis:
-                [{symbol}] Trend Quality: {trend_quality:.3f} ({'Strong' if strong_trend else 'Weak' if weak_trend else 'Normal'})
-                [{symbol}] Price Momentum: {price_momentum:.3f} (Weight: {weights['EMA_Fast']:.2f})
-                [{symbol}] MACD Signal: {macd_signal:.3f} (Weight: {weights['MACD']:.2f})
-                [{symbol}] EMA Trend: {ema_trend:.3f} (Weight: {weights['EMA_Medium']:.2f})
-                [{symbol}] Volatility: {volatility_signal:.3f} (Weight: {weights['ATR']:.2f})
-                [{symbol}] Prediction: {prediction:.3f} (Weight: {weights['Prediction']:.2f})
-                [{symbol}] Final Signal: {final_signal:.3f}
-            """)
+            logger.info("Signal Analysis:")
+            logger.info(f"Trend Quality: {trend_quality:.3f} ({'Strong' if strong_trend else 'Weak' if weak_trend else 'Normal'})")
+            logger.info(f"Price Momentum: {price_momentum:.3f} (Weight: {weights['EMA_Fast']:.2f})")
+            logger.info(f"MACD Signal: {macd_signal:.3f} (Weight: {weights['MACD']:.2f})")
+            logger.info(f"EMA Trend: {ema_trend:.3f} (Weight: {weights['EMA_Medium']:.2f})")
+            logger.info(f"Volatility: {volatility_signal:.3f} (Weight: {weights['ATR']:.2f})")
+            logger.info(f"Prediction: {prediction:.3f} (Weight: {weights['Prediction']:.2f})")
+            logger.info(f"Final Signal: {final_signal:.3f}")
 
             return final_signal
 
         except Exception as e:
-            logging.error(f"[{symbol}] Error in calculate_weighted_signal: {e}")
+            logger.error(f"Error in calculate_weighted_signal: {e}")
             return 0.0
 
     def _is_emas_packed(self, df_3m, threshold=0.0015):
@@ -892,7 +830,7 @@ class SignalGenerator:
         """Check if volatility is below threshold."""
         return df_1m['atr_pct'].iloc[-1] < atr_threshold
 
-    def _adjust_prediction_weights(self, df_1m, df_3m, weights):
+    def _adjust_prediction_weights(self, df_1m, df_3m, weights, logger: LoggerType):
         """
         Adjust weights based on market conditions.
         For Lorentzian predictions (already in [-1, 1]), we use more conservative adjustments.
@@ -921,14 +859,14 @@ class SignalGenerator:
                 if key != "Prediction":
                     adjusted_weights[key] -= reduction_per_weight
 
-            logging.info(f"Adjusted weights due to optimal conditions:")
-            logging.info(f"Volatility factor: {volatility_factor:.3f}")
-            logging.info(f"EMA pack factor: {ema_pack_factor:.3f}")
-            logging.info(f"Weight increase: {increase:.3f}")
+            logger.info("Adjusted weights due to optimal conditions:")
+            logger.info(f"Volatility factor: {volatility_factor:.3f}")
+            logger.info(f"EMA pack factor: {ema_pack_factor:.3f}")
+            logger.info(f"Weight increase: {increase:.3f}")
 
         return adjusted_weights
 
-    def _calculate_trend_quality(self, df_3m: pd.DataFrame, df_1m: pd.DataFrame) -> float:
+    def _calculate_trend_quality(self, df_3m: pd.DataFrame, df_1m: pd.DataFrame, logger: LoggerType) -> float:
         """Calculate trend quality based on EMA separations and trend structure, optimized for DCA grid trading."""
         try:
             # Use completed candles
@@ -1024,6 +962,6 @@ class SignalGenerator:
             return max(0.0, min(1.0, trend_quality))
 
         except Exception as e:
-            logging.error(f"Error calculating trend quality: {e}")
+            logger.error(f"Error calculating trend quality: {e}")
             return 0.0
 

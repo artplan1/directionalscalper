@@ -471,7 +471,7 @@ class Exchange:
             return 'neutral'
 
     def generate_l_signals_from_data(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
-        return self.signal_generator.generate_l_signals_from_data(ohlcv_1m, ohlcv_3m, symbol, neighbors_count, use_adx_filter, adx_threshold)
+        return self.signal_generator.generate(ohlcv_1m, ohlcv_3m, symbol, neighbors_count, use_adx_filter, adx_threshold)
 
     def detect_market_regime(self, df):
         """
