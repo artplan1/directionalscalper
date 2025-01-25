@@ -505,16 +505,17 @@ class SignalGenerator:
             baseline_volatility = df_3m['atr_pct'].rolling(10).mean().iloc[-2]
             vol_ratio = recent_volatility / baseline_volatility if baseline_volatility > 0 else 1
 
-            # Early warning checks using incomplete candle
+            # Early warning checks using current candle for immediate detection
             current_atr = df['atr_pct'].iloc[-1]
             current_close = df['close'].iloc[-1]
             last_close = df['close'].iloc[-2]
-            current_volume = df['volume'].iloc[-1]
+            current_volume = df['volume'].iloc[-1]  # Keep current for warnings
+            completed_volume = df['volume'].iloc[-2]  # Use for regime confirmation
             avg_volume = df['volume'].rolling(10).mean().iloc[-2]
 
             # Detect potential volatility events with dynamic thresholds
             volatility_warning = False
-            vol_spike_threshold = max(1.5, 1 + (atr_pct * 2.5))  # Increased for crypto
+            vol_spike_threshold = max(1.5, 1 + (atr_pct * 2.5))
             if current_atr > atr_pct * vol_spike_threshold:
                 volatility_warning = True
                 logging.info(f"[{symbol}] Volatility Warning: Current ATR {current_atr:.4f} vs Complete {atr_pct:.4f}")
@@ -522,8 +523,8 @@ class SignalGenerator:
             # Detect potential trend reversal with volume confirmation
             reversal_warning = False
             price_change = abs(current_close - last_close) / last_close
-            volume_surge = current_volume > avg_volume * 2.0  # Increased for crypto's volume spikes
-            if price_change > atr_pct * 1.5 and volume_surge:  # More significant move required
+            volume_surge = current_volume > avg_volume * 2.0  # Use current for immediate detection
+            if price_change > atr_pct * 1.5 and volume_surge:
                 reversal_warning = True
                 logging.info(f"[{symbol}] Reversal Warning: Price change {price_change:.4f} with {current_volume/avg_volume:.1f}x volume")
 
@@ -593,42 +594,38 @@ class SignalGenerator:
                 momentum_threshold_1m *= 1.6  # Increased from 1.4 for crypto
                 momentum_threshold_3m *= 1.6  # Increased from 1.4 for crypto
 
-            # 1. Volatile regime detection - High volatility or strong momentum
+            # 1. Volatile regime detection - Use current candle for immediate response
             if (
-                (vol_ratio > vol_threshold and current_volume > avg_volume * 1.8) or  # Increased volume req
+                (vol_ratio > vol_threshold and current_volume > avg_volume * 1.8) or  # Use current for spikes
                 (abs(short_momentum) > momentum_threshold_1m and
-                 abs(medium_momentum) > momentum_threshold_3m * 0.8) or  # Increased confirmation
-                atr_pct > 0.5 or  # Increased from 0.4 for crypto's higher volatility
-                (current_atr > atr_pct * 2.0 and current_volume > avg_volume * 1.8)  # Stricter conditions
+                 abs(medium_momentum) > momentum_threshold_3m * 0.8) or
+                atr_pct > 0.5 or
+                (current_atr > atr_pct * 2.0 and current_volume > avg_volume * 1.8)  # Use current for spikes
             ):
                 return 'volatile'
 
-            # 2. Trending regime detection - Strong trend with momentum and volume
+            # 2. Trending regime detection - Use completed candle for confirmation
             elif (
-                # Trend alignment check (relaxed)
                 abs(trend_alignment) == 1 and
-                # Momentum check (reduced threshold)
-                abs(medium_momentum) > momentum_threshold_3m * 0.4 and  # Reduced from 0.6
+                abs(medium_momentum) > momentum_threshold_3m * 0.15 and
                 (
-                    # Either strong volume with moderate EMA separation
-                    (current_volume > avg_volume * 1.3 and  # Reduced from 1.4
-                     ema_compression > 0.003) or  # Reduced from 0.0035
-                    # Or very strong momentum with minimal volume
-                    (abs(medium_momentum) > momentum_threshold_3m * 0.7 and
-                     current_volume > avg_volume * 1.2)
+                    (completed_volume > avg_volume * 1.2 and  # Use completed for trend confirmation
+                     ema_compression > 0.003) or
+                    (abs(medium_momentum) > momentum_threshold_3m * 0.3 and
+                     completed_volume > avg_volume * 1.1)  # Use completed for trend confirmation
                 ) and
-                direction_changes <= 2  # Relaxed from 1
+                direction_changes <= 2
             ):
                 return 'trending'
 
-            # 3. Normal regime detection - Stable market with clear structure
+            # 3. Normal regime detection - Use completed candle for stability
             elif (
-                0.75 < vol_ratio < 1.25 and  # Widened for crypto's natural volatility
-                ema_compression > 0.0035 and  # Increased from 0.003
-                abs(short_momentum) < momentum_threshold_1m * 0.7 and  # Reduced from 0.8
-                abs(medium_momentum) < momentum_threshold_3m * 0.8 and  # Reduced from 0.9
-                direction_changes < 2 and  # Stricter requirement
-                0.7 < current_volume / avg_volume < 1.3  # Tightened volume range
+                0.75 < vol_ratio < 1.25 and
+                ema_compression > 0.0035 and
+                abs(short_momentum) < momentum_threshold_1m * 0.7 and
+                abs(medium_momentum) < momentum_threshold_3m * 0.8 and
+                direction_changes < 2 and
+                0.7 < completed_volume / avg_volume < 1.3  # Use completed for normal confirmation
             ):
                 return 'normal'
 
