@@ -14,6 +14,9 @@ from ta.volatility import AverageTrueRange
 import pandas as pd
 import numpy as np
 import traceback
+from ..strategies.logger import Logger
+
+logging = Logger(logger_name="SignalGenerator", filename="SignalGenerator.log", stream=True)
 
 class SignalGenerator:
     def __init__(self, exchange: "Exchange"):
@@ -35,6 +38,8 @@ class SignalGenerator:
 
     def generate(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         """Generate trading signals using balanced approach between old and new implementations."""
+        self.signal_logger.cleanup()
+
         logger = self.signal_logger.get_logger(symbol)
 
         try:
@@ -397,6 +402,8 @@ class SignalGenerator:
             self.signal_logger.log_signal(symbol, signal_data, logger=logger)
 
             del df_1m, df_3m
+
+            logging.info(f"New signal: {new_signal}")
 
             return new_signal
         except Exception as e:
