@@ -180,33 +180,33 @@ class SingleBot:
                 new_symbols = {}
 
                 # it might open more than the allowed number of positions if there are open orders
-                if len(trading_symbols) < self.symbols_allowed:
-                    if (
-                        not self.rotator_symbols_cache["timestamp"]
-                        or current_time - self.rotator_symbols_cache["timestamp"] >= self.CACHE_DURATION
-                    ):
-                        logging.info("Fetching updated rotator symbols")
+                # if len(trading_symbols) < self.symbols_allowed:
+                if (
+                    not self.rotator_symbols_cache["timestamp"]
+                    or current_time - self.rotator_symbols_cache["timestamp"] >= self.CACHE_DURATION
+                ):
+                    logging.info("Fetching updated rotator symbols")
 
-                        async with general_rate_limiter_async:
-                            await self._fetch_updated_symbols()
+                    async with general_rate_limiter_async:
+                        await self._fetch_updated_symbols()
 
-                        logging.info(
-                            f"Refreshed latest rotator symbols: {self.rotator_symbols_cache['symbols']}"
-                        )
-                    else:
-                        logging.info(
-                            f"No refresh needed yet. Last update was at {self.rotator_symbols_cache['timestamp']}, less than 60 seconds ago."
-                        )
+                    logging.info(
+                        f"Refreshed latest rotator symbols: {self.rotator_symbols_cache['symbols']}"
+                    )
+                else:
+                    logging.info(
+                        f"No refresh needed yet. Last update was at {self.rotator_symbols_cache['timestamp']}, less than 60 seconds ago."
+                    )
 
-                    # should be allowed_symbols count - trading_symbols count
-                    new_symbols = [
-                        symbol for symbol in self.rotator_symbols_cache['symbols']
-                        if symbol not in trading_symbols
-                    ]
-                    # new_symbols = set(new_symbols[:self.exchange_config.symbols_allowed - len(trading_symbols)])
+                # should be allowed_symbols count - trading_symbols count
+                new_symbols = [
+                    symbol for symbol in self.rotator_symbols_cache['symbols']
+                    if symbol not in trading_symbols
+                ]
+                # new_symbols = set(new_symbols[:self.exchange_config.symbols_allowed - len(trading_symbols)])
 
-                    if new_symbols:
-                        logging.info(f"Adding new symbols: {new_symbols}")
+                if new_symbols:
+                    logging.info(f"Adding new symbols: {new_symbols}")
 
                 self.trading_symbols = trading_symbols.union(new_symbols)
 
