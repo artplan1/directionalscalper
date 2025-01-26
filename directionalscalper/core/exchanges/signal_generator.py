@@ -33,17 +33,12 @@ class SignalGenerator:
             print(f"Error during SignalGenerator cleanup: {e}")
             print(traceback.format_exc())
 
-    def __del__(self):
-        """Destructor to ensure cleanup is called."""
-        self.cleanup()
-
     def generate(self, ohlcv_1m, ohlcv_3m, symbol, neighbors_count=8, use_adx_filter=False, adx_threshold=20):
         """Generate trading signals using balanced approach between old and new implementations."""
-        self.signal_logger.cleanup()
-
-        logger = self.signal_logger.get_logger(symbol)
-
         try:
+            # Get logger for this symbol and generation run
+            logger = self.signal_logger.get_logger(symbol)
+
             # Convert list to DataFrame if needed
             if isinstance(ohlcv_1m, list):
                 logger.info("Converting 1m data to DataFrame")
@@ -408,13 +403,8 @@ class SignalGenerator:
 
             return new_signal
         except Exception as e:
-            logger.error(f"Error in generate_l_signals_from_data: {e}")
-            logger.error(f"{traceback.format_exc()}")
-            # # Clean up memory even on error
-            # try:
-            #     del df_1m, df_3m
-            # except:
-            #     pass
+            logging.error(f"Error in generate_l_signals_from_data: {e}")
+            logging.error(f"{traceback.format_exc()}")
             return "neutral"
 
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

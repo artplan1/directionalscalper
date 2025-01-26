@@ -8,10 +8,11 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
 import traceback
 from logging import Logger as LoggerType
+from collections import deque
 
 class LogFilter(logging.Filter):
     """Filter that injects instance_id and symbol into all log records."""
-    def __init__(self, instance_id, symbol=None):
+    def __init__(self, instance_id: str | None, symbol: str | None):
         super().__init__()
         self.instance_id = instance_id
         self.symbol = symbol
@@ -24,7 +25,11 @@ class LogFilter(logging.Filter):
 class SignalLogger:
     """A logger class for handling trading signals with per-symbol logging and history tracking."""
 
-    def __init__(self, base_dir: str = "logs/signals"):
+    MAX_HISTORY_SIZE = 1000
+    LOG_FORMAT = '%(asctime)s [%(symbol)s] [%(levelname)s] [Instance: %(instance_id)s] %(message)s'
+    DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+    def __init__(self, base_dir: str = "logs"):
         """Initialize the SignalLogger.
 
         Args:
@@ -33,42 +38,76 @@ class SignalLogger:
         try:
             self.base_dir = Path(base_dir)
             self.base_dir.mkdir(parents=True, exist_ok=True)
-            self.instance_id = str(uuid.uuid4())[:8]  # Short UUID for readability
             self.loggers: Dict[str, LoggerType] = {}
-            self.signal_history: Dict[str, List[Dict[str, Any]]] = {}
-            self.log_filter = LogFilter(self.instance_id)  # Global filter without symbol
+            self.signal_history = deque(maxlen=self.MAX_HISTORY_SIZE)
 
-            # Set up error logging
-            self.error_logger = self._setup_error_logger()
+            # Create shared file handlers
+            self.signals_handler = self._create_handler(
+                log_file="signals.log",
+                max_bytes=10*1024*1024,
+                backup_count=5
+            )
+            self.errors_handler = self._create_handler(
+                log_file="signal_logger_errors.log",
+                max_bytes=5*1024*1024,
+                backup_count=3
+            )
+
+            # Set up error logger with its own instance_id
+            self.error_logger = self._setup_logger(
+                name="signal_logger_errors",
+                handler=self.errors_handler,
+                level=logging.ERROR,
+                symbol=None,
+                instance_id=None
+            )
         except Exception as e:
             print(f"Failed to initialize SignalLogger: {e}")
             print(traceback.format_exc())
             raise
 
-    def _setup_error_logger(self) -> LoggerType:
-        """Set up a separate logger for internal errors.
+    def _create_handler(self, log_file: str, max_bytes: int, backup_count: int) -> handlers.RotatingFileHandler:
+        """Create a rotating file handler with standard configuration.
+
+        Args:
+            log_file (str): Log file path
+            max_bytes (int): Maximum size of log file before rotation
+            backup_count (int): Number of backup files to keep
 
         Returns:
-            LoggerType: Logger for internal errors.
+            handlers.RotatingFileHandler: Configured handler
         """
-        error_logger = logging.getLogger(f"signal_logger_errors_{self.instance_id}")
-        if error_logger.handlers:
-            error_logger.handlers.clear()
-
-        error_log_path = self.base_dir / "signal_logger_errors.log"
         handler = handlers.RotatingFileHandler(
-            error_log_path,
-            maxBytes=5*1024*1024,  # 5MB
-            backupCount=3
+            self.base_dir / log_file,
+            maxBytes=max_bytes,
+            backupCount=backup_count
         )
-        formatter = logging.Formatter(
-            '%(asctime)s [%(symbol)s] [%(levelname)s] [Instance: %(instance_id)s] %(message)s'
-        )
+        formatter = logging.Formatter(self.LOG_FORMAT, self.DATE_FORMAT)
         handler.setFormatter(formatter)
-        error_logger.addHandler(handler)
-        error_logger.setLevel(logging.ERROR)
-        error_logger.addFilter(self.log_filter)
-        return error_logger
+        return handler
+
+    def _setup_logger(self, name: str, handler: handlers.RotatingFileHandler,
+                     level: int, symbol: Optional[str], instance_id: Optional[str]) -> LoggerType:
+        """Set up a logger with standard configuration.
+
+        Args:
+            name (str): Logger name
+            handler (handlers.RotatingFileHandler): Rotating file handler
+            level (int): Logging level
+            symbol (Optional[str]): Trading symbol
+
+        Returns:
+            LoggerType: Configured logger
+        """
+        logger = logging.getLogger(name)
+        if logger.handlers:
+            logger.handlers.clear()
+
+        logger.addHandler(handler)
+        logger.setLevel(level)
+        logger.propagate = False
+        logger.addFilter(LogFilter(instance_id, symbol))
+        return logger
 
     def get_logger(self, symbol: str) -> LoggerType:
         """Get or create a logger for a specific symbol.
@@ -80,39 +119,23 @@ class SignalLogger:
             LoggerType: Symbol-specific logger instance.
         """
         try:
-            # if symbol not in self.loggers:
-            instance_id = str(uuid.uuid4())[:8]  # Short UUID for readability
+            # Remove old logger if it exists (but keep the handler)
+            if symbol in self.loggers:
+                old_logger = self.loggers[symbol]
+                old_logger.handlers.clear()  # Just remove handler reference, don't close it
+                del self.loggers[symbol]
 
-            logger = logging.getLogger(f"signal_generator_{symbol}_{instance_id}")
-            if logger.handlers:
-                logger.handlers.clear()
-
-            # Create formatter with symbol
-            file_formatter = logging.Formatter(
-                fmt='%(asctime)s [%(symbol)s] [%(levelname)s] [Instance: %(instance_id)s] %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            # Create new logger with new instance_id, reusing the handler
+            instance_id = str(uuid.uuid4())[:8]
+            logger = self._setup_logger(
+                name=f"signal_generator_{symbol}_{instance_id}",
+                handler=self.signals_handler,
+                level=logging.INFO,
+                symbol=symbol,
+                instance_id=instance_id
             )
-
-            # File handler for symbol-specific logs
-            symbol_log_path = self.base_dir / f"{symbol}.log"
-            file_handler = handlers.RotatingFileHandler(
-                symbol_log_path,
-                maxBytes=10*1024*1024,  # 10MB
-                backupCount=5
-            )
-            file_handler.setFormatter(file_formatter)
-
-            # Configure logger with symbol-specific filter
-            logger.setLevel(logging.INFO)
-            logger.addHandler(file_handler)
-            logger.propagate = False
-            logger.addFilter(LogFilter(instance_id, symbol))
-
-            # self.loggers[symbol] = logger
-
+            self.loggers[symbol] = logger
             return logger
-
-            # return self.loggers[symbol]
         except Exception as e:
             self.error_logger.error(f"Failed to create logger for {symbol}: {e}")
             self.error_logger.error(traceback.format_exc())
@@ -124,105 +147,55 @@ class SignalLogger:
         Args:
             symbol (str): Trading symbol the signal is for.
             signal_data (Dict[str, Any]): Signal data to log.
+            logger (LoggerType): Logger instance to use.
             level (str): Log level (default: "INFO").
         """
         try:
-            # Add timestamp and instance ID to signal data
             signal_entry = {
                 "timestamp": datetime.utcnow().isoformat(),
+                "symbol": symbol,
                 **signal_data
             }
 
-            # Store in history
-            if symbol not in self.signal_history:
-                self.signal_history[symbol] = []
-            self.signal_history[symbol].append(signal_entry)
-
-            # Keep only last 1000 signals per symbol
-            if len(self.signal_history[symbol]) > 1000:
-                self.signal_history[symbol] = self.signal_history[symbol][-1000:]
-
-            # Log the signal
-            log_method = getattr(logger, level.lower(), logger.info)  # Default to info if invalid level
+            self.signal_history.append(signal_entry)
+            log_method = getattr(logger, level.lower(), logger.info)
             log_method(f"Signal: {json.dumps(signal_entry, default=str)}")
-
-            # Save signal history to file periodically
-            self._save_signal_history(symbol)
+            self._save_signal_history()
         except Exception as e:
             self.error_logger.error(f"Failed to log signal for {symbol}: {e}")
             self.error_logger.error(traceback.format_exc())
             raise
 
-    def _save_signal_history(self, symbol: str) -> None:
-        """Save signal history to a JSON file.
-
-        Args:
-            symbol (str): Trading symbol to save history for.
-        """
-        history_file = self.base_dir / f"{symbol}_history.json"
+    def _save_signal_history(self) -> None:
+        """Save signal history to a JSON file."""
         try:
+            history_file = self.base_dir / "signals_history.json"
             with open(history_file, 'w') as f:
-                json.dump(self.signal_history[symbol], f, default=str, indent=2)
+                json.dump(list(self.signal_history), f, default=str, indent=2)
         except Exception as e:
-            self.error_logger.error(f"Failed to save signal history for {symbol}: {e}")
+            self.error_logger.error(f"Failed to save signal history: {e}")
             self.error_logger.error(traceback.format_exc())
 
-    def get_signal_history(self, symbol: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get signal history for a symbol with optional limit.
-
-        Args:
-            symbol (str): Trading symbol to get history for.
-            limit (Optional[int]): Maximum number of signals to return.
-
-        Returns:
-            List[Dict[str, Any]]: List of signal history entries.
-        """
-        try:
-            history = self.signal_history.get(symbol, [])
-            if limit:
-                return history[-limit:]
-            return history
-        except Exception as e:
-            self.error_logger.error(f"Failed to get signal history for {symbol}: {e}")
-            self.error_logger.error(traceback.format_exc())
-            return []
-
-    def clear_history(self, symbol: Optional[str] = None) -> None:
-        """Clear signal history for a specific symbol or all symbols.
-
-        Args:
-            symbol (Optional[str]): Symbol to clear history for. If None, clears all history.
-        """
-        try:
-            if symbol:
-                if symbol in self.signal_history:
-                    self.signal_history[symbol] = []
-                    history_file = self.base_dir / f"{symbol}_history.json"
-                    if history_file.exists():
-                        history_file.unlink()
-            else:
-                self.signal_history.clear()
-                for file in self.base_dir.glob("*_history.json"):
-                    file.unlink()
-        except Exception as e:
-            self.error_logger.error(f"Failed to clear history for {symbol or 'all symbols'}: {e}")
-            self.error_logger.error(traceback.format_exc())
-
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Cleanup resources by closing all handlers."""
         try:
-            # Close error logger handlers
-            for handler in self.error_logger.handlers:
-                handler.close()
-                self.error_logger.removeHandler(handler)
+            # Save history before cleanup
+            self._save_signal_history()
 
-            # Close all symbol-specific logger handlers
+            # Clear all loggers (without closing shared handlers)
             for logger in self.loggers.values():
-                for handler in logger.handlers:
-                    handler.close()
-                    logger.removeHandler(handler)
+                logger.handlers.clear()
             self.loggers.clear()
 
+            # Now close the shared handlers
+            if hasattr(self, 'signals_handler'):
+                self.signals_handler.close()
+            if hasattr(self, 'errors_handler'):
+                self.errors_handler.close()
+
+            # Clear error logger handlers
+            if hasattr(self, 'error_logger'):
+                self.error_logger.handlers.clear()
         except Exception as e:
             print(f"Error during cleanup: {e}")
             print(traceback.format_exc())
@@ -230,3 +203,4 @@ class SignalLogger:
     def __del__(self):
         """Destructor to ensure cleanup is called."""
         self.cleanup()
+
