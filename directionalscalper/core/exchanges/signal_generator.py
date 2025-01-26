@@ -503,6 +503,16 @@ class SignalGenerator:
     def _detect_market_regime(self, df: pd.DataFrame, df_3m: pd.DataFrame, symbol: str, logger: LoggerType) -> str:
         """Detect market regime based on volatility and momentum patterns."""
         try:
+            # Use .iloc[:-1] to exclude the last incomplete candle
+            volume_consistency = (df_3m['volume'].iloc[:-1] > df_3m['volume'].iloc[:-1].rolling(10).mean()).astype(int).sum() / 10
+
+            # Add price structure calculation after momentum calculations
+            highs = df_3m['high'].iloc[:-1].rolling(8).max()
+            lows = df_3m['low'].iloc[:-1].rolling(8).min()
+            higher_highs = (highs > highs.shift(1)).astype(int).sum()
+            lower_lows = (lows < lows.shift(1)).astype(int).sum()
+            price_structure = higher_highs - lower_lows
+
             # Base calculations on completed candles
             atr_pct = df['atr_pct'].iloc[-2]  # Completed candle
             recent_volatility = df_3m['atr_pct'].rolling(4).mean().iloc[-2]
@@ -611,11 +621,13 @@ class SignalGenerator:
                 abs(trend_alignment) == 1 and
                 abs(medium_momentum) > momentum_threshold_3m * 0.15 and
                 (
-                    # Either good EMA structure with moderate volume
-                    (completed_volume > avg_volume * 1.0 and  # Reduced from 1.2
-                     ema_compression > 0.003) or
-                    # Or strong momentum with any volume
-                    (abs(medium_momentum) > momentum_threshold_3m * 0.3)
+                    # Either good EMA structure with moderate volume and price structure alignment
+                    (completed_volume > avg_volume * 1.0 and
+                     ema_compression > 0.003 and
+                     np.sign(medium_momentum) == np.sign(trend_alignment)) or
+                    # Or strong momentum with volume consistency
+                    (abs(medium_momentum) > momentum_threshold_3m * 0.3 and
+                     volume_consistency > 0.6)
                 ) and
                 direction_changes <= 2
             ):
@@ -633,7 +645,8 @@ class SignalGenerator:
                 abs(short_momentum) < momentum_threshold_1m * 0.7 and
                 abs(medium_momentum) < momentum_threshold_3m * 0.8 and
                 direction_changes < 2 and
-                0.7 < completed_volume / avg_volume < 1.3  # Use completed for normal confirmation
+                0.7 < completed_volume / avg_volume < 1.3 and
+                abs(price_structure) <= 1  # Near equilibrium
             ):
                 return 'normal'
 
