@@ -703,6 +703,9 @@ class SignalGenerator:
 
     def _get_regime_adjusted_weights(self, market_regime: str, symbol: str, current_volatility: float, price_momentum: float, signal_data: Dict[str, Any], logger: LoggerType) -> Dict[str, float]:
         """Get weights adjusted for market regime and current market conditions."""
+        # Get trend quality from signal data
+        trend_quality = signal_data.get('trend_quality', 0.0)
+
         # Base weights for signal generation
         weights = {
             "MACD": 0.20,       # Reduced from 0.25 for less momentum dependency
@@ -726,16 +729,16 @@ class SignalGenerator:
                 weights["EMA_Fast"] *= 0.8  # Reduced from 0.9 to avoid noise
 
         elif market_regime == "ranging":
-            weights["MACD"] *= 0.5        # Reduced from 0.6 for less momentum dependency
-            weights["EMA_Fast"] *= 1.2    # Increased from 0.7 for better trend structure
-            weights["EMA_Medium"] *= 1.3  # Increased from 0.8 for better trend structure
-            weights["ATR"] *= 1.6         # Reduced from 2.0 for balanced volatility control
+            weights["MACD"] *= 0.5        # Moderate momentum dependency
+            weights["EMA_Fast"] *= 0.9    # Reduced from 1.2 - less trend dependency
+            weights["EMA_Medium"] *= 0.8  # Reduced from 1.3 - less trend dependency
+            weights["ATR"] *= 1.6         # Keep strong volatility control
 
-            # Consider prediction in ranging markets
-            if abs(signal_data.get("Prediction", 0)) > 0.2:
-                weights["Prediction"] = 0.15  # Add moderate prediction weight
+            # Consider prediction in ranging markets with weak trends
+            if trend_quality < 0.3 and abs(signal_data.get("Prediction", 0)) > 0.2:
+                weights["Prediction"] = 0.20  # Increased from 0.15
                 if signal_data.get("Prediction", 0) * price_momentum < 0:
-                    weights["ATR"] *= 1.3  # Increase volatility control on mismatch
+                    weights["ATR"] *= 1.5  # Increased from 1.3 for weak trends
 
         elif market_regime == "trending":
             weights["MACD"] *= 1.2        # Reduced from 1.3 for more conservative momentum
