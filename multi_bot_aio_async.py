@@ -458,49 +458,30 @@ class SingleBot:
             if self.config_auto_graceful_stop:
                 if (
                     current_long_positions >= self.symbols_allowed
-                    or len(self.unique_active_symbols)
-                    >= self.symbols_allowed
-                ) and not self.graceful_stop_long:
+                    or len(self.unique_active_symbols) >= self.symbols_allowed
+                ):
                     self.graceful_stop_long = True
                     logging.info(
                         f"GS Auto Check: Automatically enabled graceful stop for long positions. Current long positions: {current_long_positions}, Unique active symbols: {len(self.unique_active_symbols)}"
                     )
-                elif (
-                    current_long_positions < self.symbols_allowed
-                    and len(self.unique_active_symbols)
-                    < self.symbols_allowed
-                    and self.graceful_stop_long
-                ):
-                    self.graceful_stop_long = self.config_graceful_stop_long
-                    logging.info(
-                        f"GS Auto Check: Reverting to config value for graceful stop long. Current long positions: {current_long_positions}, Unique active symbols: {len(self.unique_active_symbols)}, Config value: {self.config_graceful_stop_long}"
-                    )
                 else:
-                    logging.info(
-                        f"GS Auto Check: Current long positions: {current_long_positions}, Unique active symbols: {len(self.unique_active_symbols)}. Graceful stop long: {self.graceful_stop_long}"
+                   self.graceful_stop_long = self.config_graceful_stop_long
+                   logging.info(
+                        f"GS Auto Check: Reverting to config value for graceful stop long. Current long positions: {current_long_positions}, Unique active symbols: {len(self.unique_active_symbols)}, Config value: {self.config_graceful_stop_long}"
                     )
 
                 if (
                     current_short_positions >= self.symbols_allowed
-                    or len(self.unique_active_symbols)
-                    >= self.symbols_allowed
-                ) and not self.graceful_stop_short:
+                    or len(self.unique_active_symbols) >= self.symbols_allowed
+                ):
                     self.graceful_stop_short = True
                     logging.info(
                         f"GS Auto Check: Automatically enabled graceful stop for short positions. Current short positions: {current_short_positions}, Unique active symbols: {len(self.unique_active_symbols)}"
                     )
-                elif (
-                    current_short_positions < self.symbols_allowed
-                    and len(self.unique_active_symbols)
-                    < self.symbols_allowed
-                    and self.graceful_stop_short
-                ):
+                else:
+                    self.graceful_stop_short = self.config_graceful_stop_short
                     logging.info(
                         f"GS Auto Check: Reverting to config value for graceful stop short. Current short positions: {current_short_positions}, Unique active symbols: {len(self.unique_active_symbols)}, Config value: {self.config_graceful_stop_short}"
-                    )
-                else:
-                    logging.info(
-                        f"GS Auto Check: Current short positions: {current_short_positions}, Unique active symbols: {len(self.unique_active_symbols)}. Graceful stop short: {self.graceful_stop_short}"
                     )
 
         except Exception as e:
