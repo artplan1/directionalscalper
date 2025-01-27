@@ -726,10 +726,16 @@ class SignalGenerator:
                 weights["EMA_Fast"] *= 0.8  # Reduced from 0.9 to avoid noise
 
         elif market_regime == "ranging":
-            weights["MACD"] *= 0.4        # Reduced from 0.5 for less momentum dependency
-            weights["EMA_Fast"] *= 1.3    # Reduced from 1.4 for more stability
-            weights["EMA_Medium"] *= 1.4  # Increased from 1.3 for better trend structure
-            weights["ATR"] *= 1.7         # Increased from 1.5 for better volatility awareness
+            weights["MACD"] *= 0.5        # Reduced from 0.6 for less momentum dependency
+            weights["EMA_Fast"] *= 1.2    # Increased from 0.7 for better trend structure
+            weights["EMA_Medium"] *= 1.3  # Increased from 0.8 for better trend structure
+            weights["ATR"] *= 1.6         # Reduced from 2.0 for balanced volatility control
+
+            # Consider prediction in ranging markets
+            if abs(signal_data.get("Prediction", 0)) > 0.2:
+                weights["Prediction"] = 0.15  # Add moderate prediction weight
+                if signal_data.get("Prediction", 0) * price_momentum < 0:
+                    weights["ATR"] *= 1.3  # Increase volatility control on mismatch
 
         elif market_regime == "trending":
             weights["MACD"] *= 1.2        # Reduced from 1.3 for more conservative momentum
