@@ -268,39 +268,77 @@ class SignalGenerator:
             logger.info(f"Weighted Signal: {weighted_signal:.3f}")
 
             # More aggressive thresholds for minute-scale trading
-            base_threshold = 0.15  # Increased from 0.12 for stricter entry signals
+            base_threshold = 0.15  # Reduced from 0.18 to allow more grid entries
 
             # Get recent momentum with noise filtering
             smooth_changes = df_1m['close'].pct_change().ewm(span=3, adjust=False).mean()
             recent_momentum = abs(smooth_changes.rolling(3).sum().iloc[-1])
 
+            # Trend quality checks for signal validation
+            trend_quality_threshold = 0.45  # Reduced from 0.6 for more realistic grid entries
+            if trend_quality < trend_quality_threshold:
+                # More moderate increase for low-quality trends
+                base_threshold *= (1 + (trend_quality_threshold - trend_quality))
+
+            # EMA alignment check - Modified for grid trading
+            ema_aligned = False
+            if weighted_signal > 0:  # For long signals
+                ema_aligned = (
+                    # Either standard alignment
+                    (df_3m['close'].iloc[-1] > df_3m['ema_fast'].iloc[-1] and
+                     df_3m['ema_fast'].iloc[-1] > df_3m['ema_medium'].iloc[-1]) or
+                    # Or potential reversal at support
+                    (df_3m['close'].iloc[-1] > df_3m['ema_fast'].iloc[-1] and
+                     abs(df_3m['close'].iloc[-1] - df_3m['ema_medium'].iloc[-1]) / df_3m['close'].iloc[-1] < 0.003)
+                )
+            else:  # For short signals
+                ema_aligned = (
+                    # Either standard alignment
+                    (df_3m['close'].iloc[-1] < df_3m['ema_fast'].iloc[-1] and
+                     df_3m['ema_fast'].iloc[-1] < df_3m['ema_medium'].iloc[-1]) or
+                    # Or potential reversal at resistance
+                    (df_3m['close'].iloc[-1] < df_3m['ema_fast'].iloc[-1] and
+                     abs(df_3m['close'].iloc[-1] - df_3m['ema_medium'].iloc[-1]) / df_3m['close'].iloc[-1] < 0.003)
+                )
+
             # Dynamic threshold adjustment
             if market_regime == "volatile":
-                threshold = base_threshold * 1.4  # Increased from 1.2 for more conservative entries
+                threshold = base_threshold * 1.4  # Reduced from 1.6
             elif market_regime == "trending":
                 # In trending markets, adjust based on trend alignment
-                if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
-                    threshold = base_threshold * 0.9  # Less aggressive reduction from 0.85
+                if ((weighted_signal > 0 and is_strong_uptrend and ema_aligned) or
+                    (weighted_signal < 0 and is_strong_downtrend and ema_aligned)):
+                    threshold = base_threshold * 0.9  # More aggressive for strong trends
                 else:
-                    threshold = base_threshold * 1.2  # More conservative from 1.1
+                    threshold = base_threshold * 1.2  # Reduced from 1.3
             elif market_regime == "ranging":
-                threshold = base_threshold * 1.1  # More conservative from 0.9
+                threshold = base_threshold * 1.2  # Reduced from 1.4 for better grid entries
             else:  # normal regime
-                if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
-                    threshold = base_threshold * 0.95  # Less aggressive from 0.85
-                elif current_volatility < 0.15:  # More strict low volatility threshold
-                    threshold = base_threshold * 1.0  # Less aggressive from 0.9
-                    if recent_momentum > 0.004:  # Increased momentum threshold
-                        threshold *= 0.95  # Less aggressive from 0.9
-                elif current_volatility > 0.6:  # Reduced from 0.8 for earlier high vol detection
-                    threshold = base_threshold * 1.2  # More conservative from 1.1
+                if ((weighted_signal > 0 and is_strong_uptrend and ema_aligned) or
+                    (weighted_signal < 0 and is_strong_downtrend and ema_aligned)):
+                    threshold = base_threshold * 0.95  # Slight reduction for confirmed trends
+                elif current_volatility < 0.15:
+                    threshold = base_threshold * 1.1  # Reduced from 1.2
+                    if recent_momentum > 0.004:
+                        threshold *= 0.95  # Allow momentum entries
+                elif current_volatility > 0.5:
+                    threshold = base_threshold * 1.3  # Reduced from 1.4
                 else:
-                    threshold = base_threshold
+                    threshold = base_threshold * 1.1  # Reduced from 1.2
 
-            # Adjust threshold based on trend quality
-            trend_quality_threshold = 0.6  # Increased from default
-            if trend_quality < trend_quality_threshold:
-                threshold *= (1 + (trend_quality_threshold - trend_quality))  # Increase threshold for lower quality trends
+            # Volume confirmation check using completed candles
+            volume_threshold = df_1m['volume'].iloc[:-1].rolling(10).mean().iloc[-1]
+            completed_volume = df_1m['volume'].iloc[-2]
+            if completed_volume < volume_threshold * 0.6:  # Reduced from 0.7
+                threshold *= 1.1  # Reduced from 1.2
+                logger.info(f"Volume below threshold: {completed_volume:.2f} < {volume_threshold:.2f} * 0.6")
+
+            # Additional checks for signal validation
+            if abs(weighted_signal) > threshold:
+                # Check if prediction contradicts signal direction
+                if ((weighted_signal > 0 and signal_data.get("Prediction", 0) < -0.2) or
+                    (weighted_signal < 0 and signal_data.get("Prediction", 0) > 0.2)):
+                    threshold *= 1.15  # Reduced from 1.25
 
             logger.info("Threshold Analysis:")
             logger.info(f"Base Threshold: {base_threshold:.3f}")
