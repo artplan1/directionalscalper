@@ -268,7 +268,7 @@ class SignalGenerator:
             logger.info(f"Weighted Signal: {weighted_signal:.3f}")
 
             # More aggressive thresholds for minute-scale trading
-            base_threshold = 0.12  # Reduced from 0.15 for faster response
+            base_threshold = 0.15  # Increased from 0.12 for stricter entry signals
 
             # Get recent momentum with noise filtering
             smooth_changes = df_1m['close'].pct_change().ewm(span=3, adjust=False).mean()
@@ -276,26 +276,31 @@ class SignalGenerator:
 
             # Dynamic threshold adjustment
             if market_regime == "volatile":
-                threshold = base_threshold * 1.2  # More conservative in volatile markets
+                threshold = base_threshold * 1.4  # Increased from 1.2 for more conservative entries
             elif market_regime == "trending":
                 # In trending markets, adjust based on trend alignment
                 if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
-                    threshold = base_threshold * 0.85  # More aggressive when aligned with trend
+                    threshold = base_threshold * 0.9  # Less aggressive reduction from 0.85
                 else:
-                    threshold = base_threshold * 1.1  # More conservative when against trend
+                    threshold = base_threshold * 1.2  # More conservative from 1.1
             elif market_regime == "ranging":
-                threshold = base_threshold * 0.9  # More aggressive in ranging markets
+                threshold = base_threshold * 1.1  # More conservative from 0.9
             else:  # normal regime
                 if (weighted_signal > 0 and is_strong_uptrend) or (weighted_signal < 0 and is_strong_downtrend):
-                    threshold = base_threshold * 0.85  # Still aggressive for strong trend even in normal regime
-                elif current_volatility < 0.2:  # Low volatility environment
-                    threshold = base_threshold * 0.9
-                    if recent_momentum > 0.003:  # Strong momentum in low vol
-                        threshold *= 0.9  # Even more aggressive
-                elif current_volatility > 0.8:  # High volatility environment
-                    threshold = base_threshold * 1.1
+                    threshold = base_threshold * 0.95  # Less aggressive from 0.85
+                elif current_volatility < 0.15:  # More strict low volatility threshold
+                    threshold = base_threshold * 1.0  # Less aggressive from 0.9
+                    if recent_momentum > 0.004:  # Increased momentum threshold
+                        threshold *= 0.95  # Less aggressive from 0.9
+                elif current_volatility > 0.6:  # Reduced from 0.8 for earlier high vol detection
+                    threshold = base_threshold * 1.2  # More conservative from 1.1
                 else:
                     threshold = base_threshold
+
+            # Adjust threshold based on trend quality
+            trend_quality_threshold = 0.6  # Increased from default
+            if trend_quality < trend_quality_threshold:
+                threshold *= (1 + (trend_quality_threshold - trend_quality))  # Increase threshold for lower quality trends
 
             logger.info("Threshold Analysis:")
             logger.info(f"Base Threshold: {base_threshold:.3f}")
@@ -662,54 +667,54 @@ class SignalGenerator:
         """Get weights adjusted for market regime and current market conditions."""
         # Base weights for signal generation
         weights = {
-            "MACD": 0.25,       # Momentum and trend confirmation
-            "EMA_Fast": 0.30,   # Immediate price action
-            "EMA_Medium": 0.25, # Trend structure
-            "ATR": 0.20,        # Volatility awareness
+            "MACD": 0.20,       # Reduced from 0.25 for less momentum dependency
+            "EMA_Fast": 0.35,   # Increased from 0.30 for better price action tracking
+            "EMA_Medium": 0.30, # Increased from 0.25 for stronger trend confirmation
+            "ATR": 0.15,        # Reduced from 0.20 to focus more on trend structure
             "Prediction": 0.0   # Removed for simplicity
         }
 
         # Apply regime-specific adjustments
         if market_regime == "volatile":
-            weights["MACD"] *= 0.9        # Increased from 0.7 for stronger momentum influence
-            weights["EMA_Fast"] *= 1.2    # Reduced from 1.3 to avoid trend bias
-            weights["EMA_Medium"] *= 1.1  # Reduced from 1.2
-            weights["ATR"] *= 1.4         # Reduced from 1.6 for less volatility focus
+            weights["MACD"] *= 0.7        # Reduced from 0.9 to be more conservative
+            weights["EMA_Fast"] *= 1.1    # Reduced from 1.2 to avoid false signals
+            weights["EMA_Medium"] *= 1.2  # Increased from 1.1 for better trend confirmation
+            weights["ATR"] *= 1.6         # Increased from 1.4 for better volatility control
 
             # Additional volatility adjustments
-            if current_volatility > 3.0:  # Extra high volatility
-                weights["MACD"] *= 1.3    # Further increase MACD importance
-                weights["ATR"] *= 1.1     # Slight increase in volatility awareness
-                weights["EMA_Fast"] *= 0.9  # Reduce fast EMA influence
+            if current_volatility > 2.5:  # Reduced from 3.0 for earlier volatility detection
+                weights["MACD"] *= 1.1    # Reduced from 1.3 for less momentum dependency
+                weights["ATR"] *= 1.3     # Increased from 1.1 for better risk control
+                weights["EMA_Fast"] *= 0.8  # Reduced from 0.9 to avoid noise
 
         elif market_regime == "ranging":
-            weights["MACD"] *= 0.5        # Reduced momentum importance
-            weights["EMA_Fast"] *= 1.4    # Increased for price action
-            weights["EMA_Medium"] *= 1.3  # Increased for trend structure
-            weights["ATR"] *= 1.5         # Increased for volatility awareness
+            weights["MACD"] *= 0.4        # Reduced from 0.5 for less momentum dependency
+            weights["EMA_Fast"] *= 1.3    # Reduced from 1.4 for more stability
+            weights["EMA_Medium"] *= 1.4  # Increased from 1.3 for better trend structure
+            weights["ATR"] *= 1.7         # Increased from 1.5 for better volatility awareness
 
         elif market_regime == "trending":
-            weights["MACD"] *= 1.3        # Increased momentum importance
-            weights["EMA_Fast"] *= 1.1    # Slightly reduced for less noise
-            weights["EMA_Medium"] *= 1.4  # Increased for stronger trend following
-            weights["ATR"] *= 0.8         # Reduced volatility focus
+            weights["MACD"] *= 1.2        # Reduced from 1.3 for more conservative momentum
+            weights["EMA_Fast"] *= 1.0    # Reduced from 1.1 for stability
+            weights["EMA_Medium"] *= 1.5  # Increased from 1.4 for stronger trend confirmation
+            weights["ATR"] *= 0.9         # Increased from 0.8 for better volatility control
 
             # Enhanced trend alignment check with price levels
             current_close = signal_data["Close"]
             current_ema_fast = signal_data["EMA_Fast"]
             if ((price_momentum < 0 and signal_data["MACD"] < signal_data["MACD_Signal"] and current_close < current_ema_fast) or
                 (price_momentum > 0 and signal_data["MACD"] > signal_data["MACD_Signal"] and current_close > current_ema_fast)):
-                weights["MACD"] *= 1.3
-                weights["EMA_Medium"] *= 1.2
+                weights["MACD"] *= 1.2     # Reduced from 1.3 for more conservative momentum
+                weights["EMA_Medium"] *= 1.3  # Increased from 1.2 for better trend confirmation
 
         else:  # normal regime
-            if current_volatility > 1.5:
-                weights["ATR"] *= 1.2
-                weights["EMA_Fast"] *= 1.1
-            elif current_volatility < 0.5:
-                weights["MACD"] *= 0.9
-                weights["ATR"] *= 1.1
-                weights["EMA_Fast"] *= 1.2
+            if current_volatility > 1.2:  # Reduced from 1.5 for earlier volatility detection
+                weights["ATR"] *= 1.3     # Increased from 1.2 for better risk control
+                weights["EMA_Fast"] *= 1.0  # Reduced from 1.1 for stability
+            elif current_volatility < 0.4:  # Reduced from 0.5 for earlier low vol detection
+                weights["MACD"] *= 0.8     # Reduced from 0.9 for less momentum dependency
+                weights["ATR"] *= 1.2      # Increased from 1.1 for better volatility awareness
+                weights["EMA_Fast"] *= 1.1  # Reduced from 1.2 for stability
 
         logger.info("Pre-normalized Weight Distribution:")
         logger.info(f"Market Regime: {market_regime}")
