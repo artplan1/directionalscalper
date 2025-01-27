@@ -523,7 +523,7 @@ class SingleBot:
                     )
 
                     if can_add_new_long_symbol or symbol in self.unique_active_symbols:
-                        if self.config_graceful_stop_long:
+                        if self.graceful_stop_long:
                             logging.info(
                                 f"Skipping long signal for {symbol} due to graceful stop long enabled and no open long position."
                             )
@@ -550,7 +550,7 @@ class SingleBot:
                     if (
                         can_add_new_short_symbol or symbol in self.unique_active_symbols
                     ):
-                        if self.config_graceful_stop_short:
+                        if self.graceful_stop_short:
                             logging.info(
                                 f"Skipping short signal for {symbol} due to graceful stop short enabled and no open short position."
                             )
