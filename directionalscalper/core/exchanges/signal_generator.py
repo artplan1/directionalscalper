@@ -864,6 +864,38 @@ class SignalGenerator:
                 prediction * weights["Prediction"]                                   # Prediction component
             )
 
+            # Add momentum confirmation check
+            candle_momentum_score = 0
+            if len(data.get("last_three_closes", [])) >= 3 and len(data.get("last_three_volumes", [])) >= 3:
+                last_three_closes = data["last_three_closes"]
+                last_three_volumes = data["last_three_volumes"]
+                last_two_moves = [last_three_closes[i] - last_three_closes[i-1] for i in range(1, 3)]
+                last_two_volumes = last_three_volumes[1:]
+
+                # Check for volume increase
+                avg_volume = last_three_volumes[0]
+                volume_increase = all(vol > avg_volume * 1.2 for vol in last_two_volumes)
+
+                if weighted_signal < 0:  # For short signals
+                    if all(move > 0 for move in last_two_moves) and volume_increase:
+                        # Stronger reduction if momentum is increasing
+                        if abs(last_two_moves[-1]) > abs(last_two_moves[0]):
+                            candle_momentum_score = -0.4
+                        else:
+                            candle_momentum_score = -0.3
+                elif weighted_signal > 0:  # For long signals
+                    if all(move < 0 for move in last_two_moves) and volume_increase:
+                        # Stronger reduction if momentum is increasing
+                        if abs(last_two_moves[-1]) > abs(last_two_moves[0]):
+                            candle_momentum_score = -0.4
+                        else:
+                            candle_momentum_score = -0.3
+
+            # Apply momentum adjustment if counter-trend momentum is detected
+            if candle_momentum_score != 0:
+                weighted_signal *= (1 + candle_momentum_score)
+                logger.info(f"Applied momentum adjustment: {candle_momentum_score:.2f} due to counter-trend momentum")
+
             # Enhanced signal alignment boost
             components = [price_momentum, macd_signal, ema_trend]
             if all(abs(c) > 0.2 for c in components) and all(np.sign(c) == np.sign(components[0]) for c in components):
